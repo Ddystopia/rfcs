@@ -190,7 +190,28 @@ For migrated users it is equivalent to semver's `minor` change, while not migrat
 
 ### Weakening associated type bound or `Self` bound in trait
 
-If user manually migrated, used a library that did not yet migrated and started relying on `T: Trait` bound, this would be breaking to them.
+If user manually migrated, used a library that did not yet migrated and started relying on `T: Trait` bound, library would be breaking users if decides to change associated type bound to `?Trait`. One way around this, as discussed in the [`forget_marker_trait`] RFC, `default_trait_bounds` and `default_assoc_bounds` should become `?Trait` when `Trait` is introduced. Unless users manually change `default_generic_bounds` and `default_foreign_assoc_bounds`, this change is not observable. Thus, libraries would have `?Trait`, and then they would not be pressured into making a breaking change when transitioning from `type Asso: Trait` to `type Assoc: ?Trait`.
+
+```rust
+#![default_generic_bounds(?Forget)]
+#![default_foreign_assoc_bounds(?Forget)]
+
+async fn foo<T: other_crate::Trait>(bar: T) {
+    let fut = bar.baz();
+    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_assoc_bounds`
+    // to `?Forget`, and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
+    // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
+    // as this code would've compiled now but not in the future.
+    core::mem::forget(fut);
+}
+
+// `other_crate`
+mod other_crate {
+    trait Trait {
+        async fn baz();
+    }
+}
+```
 
 In case of `std` 1 and 2 are mutually exclusive (rustc is 1:1 mapped with std), so no breaking is possible. But for regular crates the issue still remains, while only for the small fraction of the users, that are actively maintaining their code (unmaintained crates are not migrating).
 
