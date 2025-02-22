@@ -695,4 +695,6 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 
 This RFC will allow `async` Rust to come closer to sync ergonomics, but some code will not be able to reach this end goal and insert "abort bombs" into mandatory destructors. This is strictly better than today's status quo: `unsafe` in application code, you can work with it, but this is not ideal. A more robust approach would be the `Linear`/`MustMove`/`!Drop` types. This RFC makes a step towards more liveness guarantees, making them closer. As for the biggest problem - unwinding - with `async`, we have more choice over our behavior during unwinds. Even if we do not succeed with effects forbidding unwinding, the future containing linear type may catch any unwind during the poll and return `Poll::Pending`, potentially recovering - `async Drop` looks promising too.
 
+Maybe if `!Forget` type borrows itself, it would be equivalent to the pinning?
+
 
