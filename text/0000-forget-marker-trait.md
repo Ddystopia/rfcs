@@ -531,7 +531,7 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ### Migration using [`local_default_bounds`] RFC
 [local-defaults-migration]: #local-defaults-migration
 
-`local_default_bounds` RFC can help with making a migration smoother and does not require an edition. In a nutshell, it allows users to override default trait bounds, for example removing the `Sized` default, or adding the `MyFavouriteTrait` default. 
+`local_default_bounds` RFC can help with making a migration smoother and does not require an edition. In a nutshell, it allows users to override default trait bounds, for example removing the `Sized` default, or adding the `MyFavouriteTrait` default.
 
 In terms of `local_default_bounds` RFC, together with adding the `Forget` trait, `default_trait_bounds` `default_assoc_bounds` should become `?Forget` instead of `Forget`. This is not observable for any code that is not opting into using `Forget` explicitly, as `default_generic_bounds` and `default_foreign_assoc_bounds` are still `Forget`. It will be discussed later in [#semver-and-ecosystem](#semver-and-ecosystem).
 
@@ -591,7 +591,7 @@ async fn foo<T: other_crate::Trait>(bar: T) {
     // to `?Forget`, and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
     // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
     // as this code would've compiled now but not in the future.
-    core::mem::forget(fut); 
+    core::mem::forget(fut);
 }
 
 // `other_crate`
@@ -672,7 +672,7 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 ## Miscellaneous
 [misc-prior-art]: #misc-prior-art
 
-- https://github.com/rust-lang/rfcs/issues/1111 
+- https://github.com/rust-lang/rfcs/issues/1111
 - https://tmandry.gitlab.io/blog/posts/2023-03-01-scoped-tasks/
 
 ## MustMove types

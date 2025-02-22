@@ -176,13 +176,13 @@ Crates using `unsafe` code should beware of `ptr::write` and other unsafe ways o
 
 For generics it is simple enough: to avoid manually writing (multiple) `?Trait` bound *everywhere*, polluting the codebase with information that is not important, and generating a lot of boilerplate, resulting in the source gaining tens of kilobytes.
 
-For associated types and `Self` in traits the reason and solution are more subtle: even if we change generics in all functions in `std` to get `?Trait`, old code may rely on associated types implementing `Trait`, so we can't simply make them `?Trait`. 
+For associated types and `Self` in traits the reason and solution are more subtle: even if we change generics in all functions in `std` to get `?Trait`, old code may rely on associated types implementing `Trait`, so we can't simply make them `?Trait`.
 
-We will not only set `?Trait` bound for associated types, but we will also desugar old code to have where clause restricting all foreign associated types and `Self` in traits to `Trait`. New code will add that trait to its defaults, easily opting in for that change (or manually writing `?Trait`). 
+We will not only set `?Trait` bound for associated types, but we will also desugar old code to have where clause restricting all foreign associated types and `Self` in traits to `Trait`. New code will add that trait to its defaults, easily opting in for that change (or manually writing `?Trait`).
 
 As this is in a Pre-RFC phase I invite everyone to see how the letter is deviating from the spirit and propose fixes 😊.
 
-## Implications on the libraries 
+## Implications on the libraries
 
 ### Relax generic bound on public API
 
@@ -296,7 +296,7 @@ declare_default_assoc_bounds!(Sized, ?Forget, PartialEq);
 declare_default_foreign_assoc_bounds!(?Sized, ?Forget, PartialEq);
 ```
 
-## Use similar strategy of foreign associated types defaults, but over edition 
+## Use similar strategy of foreign associated types defaults, but over edition
 
 It may be possible to use the same trick over an edition for traits that we want to remove from defaults. In the case of `Forget`, we may set default bound for crates of edition 2024 and earlier, and lift it for editions after 2024. In terms of this RFC, it would mean that editions would have different presets of default bounds, while users would not be able to manipulate them manually.
 
