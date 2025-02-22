@@ -330,12 +330,10 @@ It may be possible to use the same trick over an edition for traits that we want
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- [ ] Maybe add shortcut for setting all 4 at once?
-- [ ] Maybe instead special case `Sized`, while all other traits will be set with 1 macro instead of 4?
+- [ ] For the purposes of [`forget_marker_trait`] only `default_generic_bounds` and  `default_foreign_assoc_bounds` are used. `default_trait_bounds` and `default_assoc_bounds` are not utilized. Maybe merge `default_generic_bounds` and  `default_foreign_assoc_bounds` together and not provide equivalents for `default_trait_bounds` and `default_assoc_bounds`? That way there will only be 1 attribute.
 - [ ] Syntax
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
-- [ ] 4 kinds seems too much... Maybe merge generics and local assocs? I was modelling after `Sized`, that's why there is 4 of them currently.
 - [ ] Maybe use the term "implicit" instead of "default".
 
 # Shiny future we are working towards
