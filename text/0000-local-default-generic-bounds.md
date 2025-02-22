@@ -62,7 +62,7 @@ See #guide-level-explanation for details.
 [use-cases]: #use-cases
 
 - `!Forget` types - types with a guarantee that destructors will run at the end of their lifetime. Those types are crucial for async and other language features, which are described in [`forget_marker_trait`] Pre-RFC. <!--  Change to RCF and update link -->
-- `Size != Stride` is a [frequently requested feature](freaquently-requested-features-size-neq-stride), but it is [fundamentally backward-incompatible change that requires `?AlignSized` bound](size-neq-stride-backward-incompatibe).
+- `Size != Stride` is a [frequently requested feature][freaquently-requested-features-size-neq-stride], but it is [fundamentally backward-incompatible change that requires `?AlignSized` bound][size-neq-stride-backward-incompatibe].
 - [`Must move`] types will benefit from this too, further improving async ergonomics.
 - (Pre-RFC only) Feel free to suggest more use cases 😊
 

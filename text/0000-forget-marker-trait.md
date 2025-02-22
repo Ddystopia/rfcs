@@ -46,7 +46,7 @@ The returned reference to the resource has the same lifetime as self ('a). The b
 ### Why is the proxy RAII guard gone?
 [proxy-raii-guards-leakpokaplipse]: #proxy-raii-guards-leakpokaplipse
 
-Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards, while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too](thred-scope-doc).
+Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards, while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too][thred-scope-doc].
 
 [leakpocalypse]: https://github.com/rust-lang/rust/issues/24292
 [PPYP]: https://cglab.ca/~abeinges/blah/everyone-poops/
@@ -134,16 +134,13 @@ The library is only taking control flow in between `await` points. Here, future 
 
 Another important observation that we can make is that `Pin`'s drop guarantee only applies to the memory of the `Future` itself. But if `Future` borrows a buffer, it *can* be deallocated or re-used before the `drop` of the `Future` is called. See [#connection-to-pin](#connection-to-pin).
 
-[#reference-level-explanation](#reference-level-explanation).
-[#connection-to-pin](#connection-to-pin).
-
 ## Examples of unsafe async APIs that can be allowed in sync Rust
 [example-safe-sync-unsafe-async]: #example-safe-sync-unsafe-async
 
 ### Async spawn
 [example-async-spawn]: #example-async-spawn
 
-Example from the ecosystem: [spawn_unchecked](spawn_unchecked-example-doc)
+Example from the ecosystem: [spawn_unchecked][spawn_unchecked-example-doc]
 
 [spawn_unchecked-example-doc]: https://docs.rs/async-task/latest/async_task/fn.spawn_unchecked.html.
 
@@ -225,7 +222,7 @@ The async version of [`take_mut`] cannot be created as it relies on cleanup code
 
 > `rio` aims to leverage Rust's compile-time checks to be misuse-resistant compared to io_uring interfaces in other languages, but users should beware that use-after-free bugs are still possible without `unsafe` when using `rio`. `Completion` borrows the buffers involved in a request and its destructor blocks to delay the freeing of those buffers until the corresponding request has been completed, but it is considered safe in Rust for an object's lifetime and borrows to end without its destructor running, and this can happen in various ways, including through `std::mem::forget`. Be careful not to let completions leak in this way, and if Rust's soundness guarantees are important to you, you may want to avoid this crate.
 
-[`ringbahn]`: https://github.com/ringbahn/ringbahn/
+[`ringbahn`]: https://github.com/ringbahn/ringbahn/
 [`tokio_uring`]: https://docs.rs/tokio-uring/latest/tokio_uring/
 [`rio`]: https://lib.rs/crates/rio
 
@@ -464,7 +461,7 @@ This means that to use message-passing with `!Forget` types, API authors must re
 ## Traditional combinators and patterns
 [traditional-workflows]: #traditional-workflows
 
-Async combinators with `join`, `race`, or `merge` semantics will continue to work as they do. If some future passed into them is `!Forget`, their future becomes `!Forget` too. `Arc` cannot be used with `!Forget` types, but the need for `Arc`, [which is quite a pain point](ergonomic-refcounting), will decrease, as users will be able to spawn with references directly.
+Async combinators with `join`, `race`, or `merge` semantics will continue to work as they do. If some future passed into them is `!Forget`, their future becomes `!Forget` too. `Arc` cannot be used with `!Forget` types, but the need for `Arc`, [which is quite a pain point][ergonomic-refcounting], will decrease, as users will be able to spawn with references directly.
 
 [ergonomic-refcounting]: https://github.com/rust-lang/rfcs/pull/3680
 
