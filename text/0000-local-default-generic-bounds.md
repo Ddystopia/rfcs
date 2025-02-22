@@ -3,6 +3,9 @@
 - RFC PR: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
+<!-- todo: Replace with RFC PR later -->
+[`forget_marker_trait`]: https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-forget-marker-trait.md
+
 # Summary
 [summary]: #summary
 
@@ -37,10 +40,9 @@ It is also important to note that in most cases those assumptions are not actual
 ## The problem
 [problem-of-default-bounds]: #problem-of-default-bounds
 
-Quotes from "Size != Stripe" [Pre-RFC thread](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933): 
+Quotes from "Size != Stripe" [Pre-RFC thread](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933):
 
 > In order to be backwards compatible, this change requires a new implicit trait bound, applied everywhere. However, that makes this change substantially less useful. If that became the way things worked forever, then `#[repr(compact)]` types would be very difficult to use, as almost no generic functions would accept them. Very few functions actually need `AlignSized`, but every generic function would get it implicitly.
-
 
 
 @scottmdcm
@@ -49,20 +51,24 @@ Quotes from "Size != Stripe" [Pre-RFC thread](https://internals.rust-lang.org/t/
 > 
 > What would an alternative look like that doesn't have the implicit trait bound?
 
-In general, many abstractions can work with both `Trait` and `!Trait` types, and only a few actually require `Trait`. For example, `Forget` bound is necessary for only a few functions in std, such as `forget` and `Box::leak`, while `Option` can work with `!Leak` types too.
-However, if Rust were to introduce `?Forget`, every generic parameter in `std` would need an explicit `?Leak` bound. This would create excessive verbosity and does not scale well.
+In general, many abstractions can work with both `Trait` and `!Trait` types, and only a few actually require `Trait`. For example, `Forget` bound is necessary for only a few functions in std, such as `forget` and `Box::leak`, while `Option` can work with `!Forget` types too.
+However, if Rust were to introduce `?Forget`, every generic parameter in `std` would need an explicit `?Forget` bound. This would create excessive verbosity and does not scale well.
 
-There is a more fundamental problem noted by @bjorn3: `std` would still need to have `Forget` bounds on all associated items of traits to maintain backward compatibility, as some code may depend on them. This makes `!Leak` types significantly harder to use and reduces their practicality. Fortunately, @Nadrieril proposed a solution to that problem, which resulted in that RFC.
+There is a more fundamental problem noted by @bjorn3: `std` would still need to have `Forget` bounds on all associated items of traits to maintain backward compatibility, as some code may depend on them. This makes `!Forget` types significantly harder to use and reduces their practicality. Fortunately, @Nadrieril proposed a solution to that problem, which resulted in that RFC.
 
 See #guide-level-explanation for details.
 
 ## Use cases
 [use-cases]: #use-cases
 
-- `!Forget` types - types with a guarantee that destructors will run at the end of their lifetime. Those types are crucial for async and other language features, which are described in [`leak_marker_trait`](todo) Pre-RFC. <!--  Change to RCF and update link -->
-- `Size != Stride` is a [frequently requested feature](https://github.com/rust-lang/lang-team/blob/master/src/frequently-requested-changes.md#size--stride), but it is [fundamentally backward-incompatible change that requires `?AlignSized` bound](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933#the-alignsized-trait-and-stdarrayfrom_ref-8).
-- [`Must move`](https://smallcultfollowing.com/babysteps/blog/2023/03/16/must-move-types/#so-how-would-must-move-work) types will benefit from this too, further improving async ergonomics.
+- `!Forget` types - types with a guarantee that destructors will run at the end of their lifetime. Those types are crucial for async and other language features, which are described in [`forget_marker_trait`] Pre-RFC. <!--  Change to RCF and update link -->
+- `Size != Stride` is a [frequently requested feature](freaquently-requested-features-size-neq-stride), but it is [fundamentally backward-incompatible change that requires `?AlignSized` bound](size-neq-stride-backward-incompatibe).
+- [`Must move`] types will benefit from this too, further improving async ergonomics.
 - (Pre-RFC only) Feel free to suggest more use cases 😊
+
+[freaquently-requested-features-size-neq-stride]: https://github.com/rust-lang/lang-team/blob/master/src/frequently-requested-changes.md#size--stride
+[size-neq-stride-backward-incompatibe]: https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933#the-alignsized-trait-and-stdarrayfrom_ref-8
+[`Must move`]: https://smallcultfollowing.com/babysteps/blog/2023/03/16/must-move-types/#so-how-would-must-move-work
 
 The expected outcome is an open road for new language features to enter the language in a backward-compatible way and allow users and libraries to adapt gradually.
 
@@ -78,7 +84,7 @@ The syntax is to be bikeshedded, initially, it might be with a crate-level attri
 #![default_foreign_assoc_bounds(?Sized, ?Forget, PartialEq)]
 ```
 
-The following example demonstrates how the compiler will understand the code. (`PartialEq` is just for an illustration)
+The following example demonstrates how the compiler will understand the code. (`PartialEq` is just for an illustration. Probably nobody would ever need to use this with `PartialEq`).
 
 ```rust
 #![default_generic_bounds(Sized, ?Forget, PartialEq)]
@@ -113,7 +119,7 @@ Code above will desugar into this:
 ```rust
 use std::ops::Deref;
 
-trait Trait: Deref<Target: ?Sized + ?Forget + PartialEq> + ?PartialEq + ?Sized + ?Leak
+trait Trait: Deref<Target: ?Sized + ?Forget + PartialEq> + ?PartialEq + ?Sized + ?Forget
 {
     type Assoc: Sized + Forget + PartialEq;
 }
@@ -124,7 +130,7 @@ struct Bar<T: Sized + ?Forget + ?PartialEq>(T);
 struct Baz<'a, T>(T, &'a T::Target, T::Assoc)
 where
     T: Sized + ?Forget + PartialEq,
-    T: Trait<Target: ?Sized + ?Forget + PartialEq, Assoc: Sized + Leak + PartialEq>
+    T: Trait<Target: ?Sized + ?Forget + PartialEq, Assoc: Sized + Forget + PartialEq>
 ;
 
 impl Trait for &i32 {
@@ -263,7 +269,9 @@ where
 This design is simple yet powerful because it offers a backward-compatible way to evolve the language.
 
 The impact of not accepting this RFC is that language features requiring types like `!Forget`, `MustMove`,
-[`!AlignSized`](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933) and many others will not be accepted.
+[`!AlignSized`] and many others will not be accepted.
+
+[`!AlignSized`]: https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933
 
 ## Alternative syntax
 [alternative-syntax]: #alternative-syntax
@@ -309,6 +317,6 @@ It may be possible to use the same trick over an edition for traits that we want
 - [ ] 4 kinds seems too much... Maybe merge generics and local assocs? I was modelling after `Sized`, that's why there is 4 of them currently.
 - [ ] Maybe use the term "implicit" instead of "default".
 
-# Shiny future we are working towards 
+# Shiny future we are working towards
 
 Less backward compatibility burden and more freedom to fix old mistakes, and propose new exciting features.

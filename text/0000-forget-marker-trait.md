@@ -3,7 +3,8 @@
 - RFC PR: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
-[`local_default_bounds`]: https://rust-lang/rfcs#000
+<!-- todo: Replace with RFC PR later -->
+[`local_default_bounds`]: https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-local-default-generic-bounds.md
 
 # Summary
 [summary]: #summary
@@ -14,7 +15,7 @@ Add a `Forget` marker trait indicating whether is it safe to skip the destructor
 [motivation]: #motivation
 
 Many readers may find the biggest problem with `Forget` to be migration.
-RFC's confidence is taken from the fact that migration can be done easily. See [#migration] section for details.
+RFC's confidence is taken from the fact that migration can be done easily. See [#migration](#migration) section for details.
 
 Back in 2015, the decision was made to remove the `Drop` guarantee, making every type implicitly implement `Forget`. All APIs in `std` could've been preserved without it. Only one of them needed to be changed. Today is 2025, and some things changed, and old reasoning is no longer true.  This RFC is not targeted at resource leaks in general but is instead focused on allowing a number of APIs to become safe.
 
@@ -45,7 +46,11 @@ The returned reference to the resource has the same lifetime as self ('a). The b
 ### Why is the proxy RAII guard gone?
 [proxy-raii-guards-leakpokaplipse]: #proxy-raii-guards-leakpokaplipse
 
-Back in 2015 [leakpokaplipse](https://github.com/rust-lang/rust/issues/24292) happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP](https://cglab.ca/~abeinges/blah/everyone-poops/) allows data structures to provide RAII guards, while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [(which later got replaced too)](https://doc.rust-lang.org/std/thread/fn.scope.html).
+Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards, while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too](thred-scope-doc).
+
+[leakpocalypse]: https://github.com/rust-lang/rust/issues/24292
+[PPYP]: https://cglab.ca/~abeinges/blah/everyone-poops/
+[thred-scope-doc]: https://doc.rust-lang.org/std/thread/fn.scope.html
 
 Instead of having a guarantee of the destructor running we can take a closure/callback instead of returning a guard object:
 
@@ -123,9 +128,14 @@ async fn main() {
 }
 ```
 
-The library is only taking control flow in between `await` points. Here, future is pinned and [Pin]'s [drop guarantee](https://doc.rust-lang.org/std/pin/#drop-guarantee) is met (boxed future remains allocated for `'static`), but clean up cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system and other C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
+The library is only taking control flow in between `await` points. Here, future is pinned and [Pin]'s [drop guarantee] is met (boxed future remains allocated for `'static`), but clean up cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system and other C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
 
-Another important observation that we can make is that `Pin`'s drop guarantee only applies to the memory of the `Future` itself. But if `Future` borrows a buffer, it *can* be deallocated or re-used before the `drop` of the `Future` is called. See [#connection-to-pin].
+[drop guarantee]: https://doc.rust-lang.org/std/pin/#drop-guarantee
+
+Another important observation that we can make is that `Pin`'s drop guarantee only applies to the memory of the `Future` itself. But if `Future` borrows a buffer, it *can* be deallocated or re-used before the `drop` of the `Future` is called. See [#connection-to-pin](#connection-to-pin).
+
+[#reference-level-explanation](#reference-level-explanation).
+[#connection-to-pin](#connection-to-pin).
 
 ## Examples of unsafe async APIs that can be allowed in sync Rust
 [example-safe-sync-unsafe-async]: #example-safe-sync-unsafe-async
@@ -133,7 +143,9 @@ Another important observation that we can make is that `Pin`'s drop guarantee on
 ### Async spawn
 [example-async-spawn]: #example-async-spawn
 
-Example from the ecosystem: [spawn_unchecked](https://docs.rs/async-task/latest/async_task/fn.spawn_unchecked.html).
+Example from the ecosystem: [spawn_unchecked](spawn_unchecked-example-doc)
+
+[spawn_unchecked-example-doc]: https://docs.rs/async-task/latest/async_task/fn.spawn_unchecked.html.
 
 With the `Forget` trait we can make that API safe:
 
@@ -185,27 +197,37 @@ start(&mut serial);
 corrupted();
 ```
 
-See [blog.japaric.io/safe-dma](https://blog.japaric.io/safe-dma/) for more.
+See [blog.japaric.io/safe-dma] for more.
+
+[blog.japaric.io/safe-dma]: https://blog.japaric.io/safe-dma/
 
 ### GPU
 [example-async-cuda]: #example-async-cuda
 
-[`async-cuda`](https://crates.io/crates/async-cuda), an ergonomic library for interacting with the GPU asynchronously. GPU is just another I/O device (from the point of view of the program), the async model fits surprisingly well. But, this library enforces `!Forget` via documentation requirements.
+[`async-cuda`], an ergonomic library for interacting with the GPU asynchronously. GPU is just another I/O device (from the point of view of the program), the async model fits surprisingly well. But, this library enforces `!Forget` via documentation requirements.
+
+[`async-cuda`]: https://crates.io/crates/async-cuda
 
 > Internally, the Future type in this crate schedules a CUDA call on a separate runtime thread. To make the API as ergonomic as possible, the lifetime bounds of the closure (that is sent to the runtime) are tied to the future object. To enforce this bound, the future will block and wait if it is dropped. This mechanism relies on the future being driven to completion, and not forgotten. This is not necessarily guaranteed. Unsafety may arise if either the runtime gives up on or forgets the future, or the caller manually polls the future, then forgets it.
 
 ### `take_mut`
 
-The async version of [`take_mut`](https://docs.rs/take_mut/latest/take_mut/) cannot be created as it relies on cleanup code to abort the program.
+The async version of [`take_mut`] cannot be created as it relies on cleanup code to abort the program.
+
+[`take_mut`]: https://docs.rs/take_mut/latest/take_mut/
 
 ### `io_uring`
 [example-async-io_uring]: #example-async-io_uring
 
-`io_uring` is another API that needs `!Forget` in order to function properly. There are attempts at making safe wrappers like [ringbahn](https://github.com/ringbahn/ringbahn), which introduces an internal buffer, or [tokio_uring](https://docs.rs/tokio-uring/latest/tokio_uring/), that requires passing an ownership of the target buffer.
+`io_uring` is another API that needs `!Forget` in order to function properly. There are attempts at making safe wrappers like [`ringbahn`], which introduces an internal buffer, or [`tokio_uring`], that requires passing an ownership of the target buffer.
 
-[rio](https://lib.rs/crates/rio) took an approach like `async-cuda`, implicitly making its futures `!Forget` via documentation.
+[`rio`] took an approach like `async-cuda`, implicitly making its futures `!Forget` via documentation.
 
 > `rio` aims to leverage Rust's compile-time checks to be misuse-resistant compared to io_uring interfaces in other languages, but users should beware that use-after-free bugs are still possible without `unsafe` when using `rio`. `Completion` borrows the buffers involved in a request and its destructor blocks to delay the freeing of those buffers until the corresponding request has been completed, but it is considered safe in Rust for an object's lifetime and borrows to end without its destructor running, and this can happen in various ways, including through `std::mem::forget`. Be careful not to let completions leak in this way, and if Rust's soundness guarantees are important to you, you may want to avoid this crate.
+
+[`ringbahn]`: https://github.com/ringbahn/ringbahn/
+[`tokio_uring`]: https://docs.rs/tokio-uring/latest/tokio_uring/
+[`rio`]: https://lib.rs/crates/rio
 
 ### C/C++ bindings + async do not work well together
 [example-async-c-cpp-bindings]: #example-async-c-cpp-bindings
@@ -220,7 +242,7 @@ The core goal of `Forget` trait, as proposed in that RFC, is to bring back the "
 ## What does `!Forget` mean?
 [what-not-forget-mean]: #what-not-forget-mean
 
-If any resources are borrowed by some type `T: !Forget`, they will remain borrowed until `T` is dropped. See a more precise description in [#reference-level-explanation].
+If any resources are borrowed by some type `T: !Forget`, they will remain borrowed until `T` is dropped. See a more precise description in [#reference-level-explanation](#reference-level-explanation).
 
 ```rust
 let mut resource = [0u8; 1024];
@@ -235,7 +257,7 @@ let first_byte = resource[0]; // Potential UB
 ## How is `Forget` related to `Pin`?
 [connection-to-pin]: #connection-to-pin
 
-Both `Forget` and `Pin` concepts serve a similar purpose - guaranteeing that some memory is not moved or repurposed. How `Forget` does it? If any resource is borrowed, you cannot take `&mut` reference to it, as it would be aliased by `!Forget` type that is borrowing from it. Before `!Forget` type goes out of scope, removing the borrow, its drop handler must be executed, just like `Pin`'s [drop guarantee](https://doc.rust-lang.org/std/pin/#drop-guarantee). So `!Unpin` protects directly owned memory, while `!Forget` protects *borrowed* memory.
+Both `Forget` and `Pin` concepts serve a similar purpose - guaranteeing that some memory is not moved or repurposed. How `Forget` does it? If any resource is borrowed, you cannot take `&mut` reference to it, as it would be aliased by `!Forget` type that is borrowing from it. Before `!Forget` type goes out of scope, removing the borrow, its drop handler must be executed, just like `Pin`'s [drop guarantee]. So `!Unpin` protects directly owned memory, while `!Forget` protects *borrowed* memory.
 
 With `Forget`, some authors may have the option to borrow the data instead of owning it, making their futures `Unpin`, but `!Forget`.
 
@@ -442,7 +464,9 @@ This means that to use message-passing with `!Forget` types, API authors must re
 ## Traditional combinators and patterns
 [traditional-workflows]: #traditional-workflows
 
-Async combinators with `join`, `race`, or `merge` semantics will continue to work as they do. If some future passed into them is `!Forget`, their future becomes `!Forget` too. `Arc` cannot be used with `!Forget` types, but the need for `Arc`, [which is quite a pain point](https://github.com/rust-lang/rfcs/pull/3680), will decrease, as users will be able to spawn with references directly.
+Async combinators with `join`, `race`, or `merge` semantics will continue to work as they do. If some future passed into them is `!Forget`, their future becomes `!Forget` too. `Arc` cannot be used with `!Forget` types, but the need for `Arc`, [which is quite a pain point](ergonomic-refcounting), will decrease, as users will be able to spawn with references directly.
+
+[ergonomic-refcounting]: https://github.com/rust-lang/rfcs/pull/3680
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -453,7 +477,9 @@ This new auto trait is added to the `core::marker` and `std::marker` modules:
 pub unsafe auto trait Forget { }
 ```
 
-Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types are not reused or invalidated until the drop (just like `Pin`'s [drop guarantee](https://doc.rust-lang.org/std/pin/#drop-guarantee), but with indirection).  Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with (`Pin::static_ref`)[https://doc.rust-lang.org/std/pin/struct.Pin.html#method.static_ref]).
+Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types are not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection).  Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).
+
+[`Pin::static_ref`]: https://doc.rust-lang.org/std/pin/struct.Pin.html#method.static_ref
 
 In practice, we disallow skipping the destructor of `!Forget` types before they exit the scope. Violation is not an immediate undefined behavior, but other code can rely on the destructor running, which can lead to undefined behavior down the road.
 
@@ -471,7 +497,7 @@ resource[0] = 42; // unreachable
 ## Standard Library
 [std]: #std
 
-All APIs in the standard library should be migrated at once. With available migration strategies, there is no benefit in gradual migration, while it will greatly reduce the productivity of rustc developers by adding boilerplate and noise into the codebase. An audit must be performed to ensure which APIs must remain `Forget`. See #migration for more details.
+All APIs in the standard library should be migrated at once. With available migration strategies, there is no benefit in gradual migration, while it will greatly reduce the productivity of rustc developers by adding boilerplate and noise into the codebase. An audit must be performed to ensure which APIs must remain `Forget`. See [#migration](#migration) for more details.
 
 No types in std will be changed to `!Forget`.
 
@@ -502,14 +528,14 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ## Migration
 [migration]: #drawbacks
 
-### Migration using [local_default_bounds] RFC
+### Migration using [`local_default_bounds`] RFC
 [local-defaults-migration]: #local-defaults-migration
 
-[local_default_bounds] RFC can help with making a migration smoother and does not require an edition. In a nutshell, it allows users to override default trait bounds, for example removing the `Sized` default, or adding the `MyFavouriteTrait` default. 
+`local_default_bounds` RFC can help with making a migration smoother and does not require an edition. In a nutshell, it allows users to override default trait bounds, for example removing the `Sized` default, or adding the `MyFavouriteTrait` default. 
 
-In terms of [local_default_bounds] RFC, together with adding the `Forget` trait, `default_trait_bounds` `default_assoc_bounds` should become `?Forget` instead of `Forget`. This is not observable for any code that is not opting into using `Forget` explicitly, as `default_generic_bounds` and `default_foreign_assoc_bounds` are still `Forget`. It will be discussed later in [#semver-and-ecosystem].
+In terms of `local_default_bounds` RFC, together with adding the `Forget` trait, `default_trait_bounds` `default_assoc_bounds` should become `?Forget` instead of `Forget`. This is not observable for any code that is not opting into using `Forget` explicitly, as `default_generic_bounds` and `default_foreign_assoc_bounds` are still `Forget`. It will be discussed later in [#semver-and-ecosystem](#semver-and-ecosystem).
 
-As discussed in [#semver-and-ecosystem], libraries adopting `?Forget` signatures will be a minor semver change at most. Thus, migration to `?Forget` would be equivalent to the currently accepted and stable `const fn`. Libraries are already adopting `const fn` and there is no notion against using `const` functions or ecosystem split - the ecosystem is migrating and PRs are being merged, making more and more functions `const`.
+As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopting `?Forget` signatures will be a minor semver change at most. Thus, migration to `?Forget` would be equivalent to the currently accepted and stable `const fn`. Libraries are already adopting `const fn` and there is no notion against using `const` functions or ecosystem split - the ecosystem is migrating and PRs are being merged, making more and more functions `const`.
 
 #### Not interested in migration crates
 [no-local-defaults-migration]: #no-local-defaults-migration
@@ -594,7 +620,7 @@ This is a manual, tedious process, it will pollute the codebases with boilerplat
 ## Migration
 [drawbacks-migration]: #drawbacks-migration
 
-If [`local_default_bounds`] is accepted, migration would be practically seamless, as described in [#migration]. Even if it's not accepted, less seamless but still acceptable solution would be a change over edition.
+If [`local_default_bounds`] is accepted, migration would be practically seamless, as described in [#migration](#migration). Even if it's not accepted, less seamless but still acceptable solution would be a change over edition.
 
 ## Message Passing
 [drawbacks-message-passing]: #drawbacks-message-passing
