@@ -34,7 +34,7 @@ fn deref<'a>(&'a self) -> &'a T {
 }
 ```
 
-The returned reference to the resource has the same lifetime as self ('a). The borrow checker therefore ensures that the lifetime of the reference to T is shorter than the lifetime of self.
+The returned reference to the resource has the same lifetime as `self` (`'a`). The borrow checker therefore ensures that the lifetime of the reference to `T` is shorter than the lifetime of `self`.
 
 ## What is a proxy RAII guard?
 [proxy-raii-guards]: #proxy-raii-guards
@@ -46,7 +46,7 @@ The returned reference to the resource has the same lifetime as self ('a). The b
 ### Why is the proxy RAII guard gone?
 [proxy-raii-guards-leakpokaplipse]: #proxy-raii-guards-leakpokaplipse
 
-Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards, while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too][thred-scope-doc].
+Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too][thred-scope-doc].
 
 [leakpocalypse]: https://github.com/rust-lang/rust/issues/24292
 [PPYP]: https://cglab.ca/~abeinges/blah/everyone-poops/
@@ -67,11 +67,11 @@ Thus, there was no point in redesigning the language and delaying Rust 1.0, prac
 ### What is different
 [what-is-different]: #what-is-different
 
-Edition 2018 introduced `sync` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines, which borrow some resources from outside or directly own them. It is on the user to poll those state machines to completion. `!Forget` patterns could've been expressed by other means with sync Rust (like taking a callback instead of returning a guard or PPYP), but with `async`, anything turns directly into `impl Future + use<'a>`, which is equivalent to the RAII guard.
+Edition 2018 introduced `async` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines which borrow some resources from outside or directly own them. It is user's responsibility to poll those state machines to completion. `!Forget` use cases could've been expressed by other means in sync Rust (like taking a callback instead of returning a guard or PPYP), but with `async`, anything turns directly into `impl Future + use<'a>` which is equivalent to the RAII guard.
 
 Various OS or C/C++ APIs cannot be made `async` without performance or ergonomics costs. PPYP can work for `Drain<'a>`, but not for `io_uring`. As long as the future directly owns (or is `'static`) all data it is accessing `Pin` guarantees are sufficient. Otherwise, there is no way to make a sound API.
 
-Let's try to translate the previous example, a widely used pattern, to sync Rust.
+Let's try to translate the previous example, a widely used pattern, to `async` Rust. Here is more elaborated sync example:
 
 ```rust
 fn something_with_clean_up(f: impl FnOnce(Foo)) {
@@ -90,7 +90,6 @@ fn main() {
 
 As you can see, after calling `something_with_clean_up`, the control flow is passed to the library. The rest of the user's code *cannot* continue executing before `something_with_clean_up` performs a cleanup (assuming unwinding is handled properly).
 
-
 ```rust
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
     // setup
@@ -106,7 +105,7 @@ async fn main() {
 }
 ```
 
-In this code snipped we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but in reality, it is not guaranteed. All `async` calls are turned into structs - like RAII guards we talked about earlier:
+In this code snipped we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but it is not guaranteed. All `async` calls are turned into structs - like RAII guards we talked about earlier:
 
 ```rust
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
@@ -128,7 +127,7 @@ async fn main() {
 }
 ```
 
-The library is only taking control flow in between `await` points. Here, future is pinned and [Pin]'s [drop guarantee] is met (boxed future remains allocated for `'static`), but clean up cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system and other C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
+The library is only taking control flow in between `await` points. Here, future is pinned and [Pin]'s [drop guarantee] is met (boxed future remains allocated for `'static`), but cleanup cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system and other C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
 
 [drop guarantee]: https://doc.rust-lang.org/std/pin/#drop-guarantee
 
@@ -153,7 +152,7 @@ struct TaskHandler<'a>(u64, PhantomNonForget, PhantomData<&'a ()>);
 impl Drop for TaskHandler<'_> {
     fn drop(&mut self) {
         if let Some(mut mutex) = GLOBAL.get(self.0) {
-            // We can block in async context as this mutex is held during the `poll`, which should return in a timely manner.
+            // We can block in async context as this mutex is held during the `poll` which should return in a timely manner.
             let fut = mutex.lock();
             // cancel the future and call its drop handler
             drop(fut.take())
@@ -494,7 +493,7 @@ resource[0] = 42; // unreachable
 ## Standard Library
 [std]: #std
 
-All APIs in the standard library should be migrated at once. With available migration strategies, there is no benefit in gradual migration, while it will greatly reduce the productivity of rustc developers by adding boilerplate and noise into the codebase. An audit must be performed to ensure which APIs must remain `Forget`. See [#migration](#migration) for more details.
+All APIs in the standard library should be migrated at once. With available migration strategies, there is no benefit in gradual migration, it will greatly reduce the productivity of rustc developers by adding boilerplate and noise into the codebase. An audit must be performed to ensure which APIs must remain `Forget`. See [#migration](#migration) for more details.
 
 No types in std will be changed to `!Forget`.
 
