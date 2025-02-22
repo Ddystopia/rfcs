@@ -294,6 +294,11 @@ The impact of not accepting this RFC is that language features requiring types l
 
 [`!AlignSized`]: https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933
 
+## Simplify the whole thing
+[maybe-just-simplify]: #maybe-just-simplify
+
+For the purposes of [`forget_marker_trait`] only `default_generic_bounds` and  `default_foreign_assoc_bounds` are used. `default_trait_bounds` and `default_assoc_bounds` are not utilized. Maybe merge `default_generic_bounds` and  `default_foreign_assoc_bounds` together and not provide equivalents for `default_trait_bounds` and `default_assoc_bounds`? That way there will only be 1 attribute. This is my personal favorite now, but this is already written so I would like to get some feedback :-)
+
 ## Alternative syntax
 [alternative-syntax]: #alternative-syntax
 
@@ -330,7 +335,7 @@ It may be possible to use the same trick over an edition for traits that we want
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- [ ] For the purposes of [`forget_marker_trait`] only `default_generic_bounds` and  `default_foreign_assoc_bounds` are used. `default_trait_bounds` and `default_assoc_bounds` are not utilized. Maybe merge `default_generic_bounds` and  `default_foreign_assoc_bounds` together and not provide equivalents for `default_trait_bounds` and `default_assoc_bounds`? That way there will only be 1 attribute.
+- [ ] Maybe go with [#maybe-just-simplify](#maybe-just-simplify)
 - [ ] Syntax
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
