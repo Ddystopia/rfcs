@@ -4,7 +4,7 @@
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
 <!-- todo: Replace with RFC PR later -->
-[`local_default_bounds`]: https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-local-default-generic-bounds.md
+[`local_default_bounds`]: https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-local-default-generic-bounds-v2.md
 
 # Summary
 [summary]: #summary
@@ -622,7 +622,7 @@ mod migrated {
 }
 ```
 
-In the context of the `local_default_bounds` RFC, along with introducing the `Forget` trait, `default_trait_bounds` and `default_assoc_bounds` should default to `?Forget` rather than `Forget`. This change is not observable for code that does not explicitly opt into using `Forget`, as `default_generic_bounds` and `default_foreign_assoc_bounds` will continue to default to `Forget`. A more detailed explanation will follow later.
+In the context of the `local_default_bounds` RFC, along with introducing the `Forget` trait, Bounds for  `Self` and associated types should default to `?Forget` rather than `Forget`. This change is not observable for code that does not explicitly opt into using `Forget`, as `default_generic_bounds` and `default_foreign_assoc_bounds` will continue to default to `Forget`. A more detailed explanation will follow later.
 
 As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopting `?Forget` in their signatures will, at most, require a minor semver change. Consequently, migrating to `?Forget` would be equivalent to the now stable `const fn` feature. Libraries have already been adopting `const fn` without causing ecosystem fragmentation, as pull requests continue to be merged, progressively making more functions `const`.
 
