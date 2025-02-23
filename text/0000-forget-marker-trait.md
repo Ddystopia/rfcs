@@ -9,7 +9,7 @@
 # Summary
 [summary]: #summary
 
-Add a `Forget` marker trait indicating whether is it safe to skip the destructor before the type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and esosystem.
+Add a `Forget` marker trait indicating whether it is safe to skip the destructor before the type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and ecosystem.
 
 # Motivation
 [motivation]: #motivation
@@ -86,7 +86,7 @@ fn deref<'a>(&'a self) -> &'a T {
 }
 ```
 
-The returned reference to the resource has the same lifetime as `self` (`'a`). The borrow checker therefore ensures that the lifetime of the reference to `T` is shorter than the lifetime of `self`.
+The returned reference to the resource has the same lifetime as `self` (`'a`). The borrow checker, therefore, ensures that the lifetime of the reference to `T` is shorter than the lifetime of `self`.
 
 ### What is a proxy RAII guard?
 [proxy-raii-guards]: #proxy-raii-guards
@@ -173,7 +173,7 @@ async fn main() {
 }
 ```
 
-In this code snipped we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but it is not guaranteed. All `async` calls are turned into structs - like RAII guards we talked about earlier:
+In this code snipped we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but it is not guaranteed. All `async` calls are turned into structs - like the RAII guards we talked about earlier:
 
 ```rust
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
@@ -274,12 +274,12 @@ See [blog.japaric.io/safe-dma] for more.
 
 [`async-cuda`]: https://crates.io/crates/async-cuda
 
-> Internally, the `Future` type in this crate schedules a CUDA call on a separate runtime thread. To make the API as ergonomic as possible, the lifetime bounds of the closure (that is sent to the runtime) are tied to the future object. To enforce this bound, the future will block and wait if it is dropped. This mechanism relies on the future being driven to completion, and not forgotten. This is not necessarily guaranteed. Unsafety may arise if either the runtime gives up on or forgets the future, or the caller manually polls the future, then forgets it.
+> Internally, the `Future` type in this crate schedules a CUDA call on a separate runtime thread. To make the API as ergonomic as possible, the lifetime bounds of the closure (that is sent to the runtime) are tied to the future object. To enforce this bound, the future will block and wait if it is dropped. This mechanism relies on the future being driven to completion, and not forgotten. This is not necessarily guaranteed. Unsafety may arise if either the runtime gives up on or forgets the future, or the caller manually polls the future, and then forgets it.
 
 ### `io_uring`
 [example-async-io_uring]: #example-async-io_uring
 
-`io_uring` is another API that needs `!Forget` in order to function properly. There are attempts at making safe wrappers like [`ringbahn`], which introduces an internal buffer, or [`tokio_uring`], that requires passing an ownership of the target buffer.
+`io_uring` is another API that needs `!Forget` to function properly. There are attempts at making safe wrappers like [`ringbahn`], which introduces an internal buffer, or [`tokio_uring`], that requires passing ownership of the target buffer.
 
 [`rio`] took an approach like `async-cuda`, implicitly making its futures `!Forget` via documentation.
 
@@ -360,7 +360,7 @@ fn main() {
 
 In this case, `handle` borrows from `buf`, but the code that accessing `buf` is not directly tied to `handle`, it runs independently of it. Because of this, even if we pin `handle`, we still can *remove the borrow* (by ending the lifetime of `handle`) on `buf` while `JoinHandle`'s memory remains available (`forget(Box::pin(handle))`).
 
-Functions having signatures with weakening can remove a type from the scope without running its destrucor. The following function is an example of a weakening function - after it is called, the borrow checker assumes that the lifetime of `T` has ended, as well as all borrows held by `T`.
+Functions having signatures with weakening can remove a type from the scope without running its destructor. The following function is an example of a weakening function - after it is called, the borrow checker assumes that the lifetime of `T` has ended, as well as all borrows held by `T`.
 
 ```rust
 fn weakener<T>(foo: T) -> i32 {
@@ -421,7 +421,7 @@ fn main() {
 }
 ```
 
-In this code, no memory is leaked, and `JoinHandle`'s destructor is not skipped. However, many types of channels - including rendezvous channels — can also be vulnerable to this issue if their signatures allows an equivalent implementation using reference counting.
+In this code, no memory is leaked, and `JoinHandle`'s destructor is not skipped. However, many types of channels - including rendezvous channels — can also be vulnerable to this issue if their signatures allow an equivalent implementation using reference counting.
 
 ```rust
 fn main() {
@@ -448,7 +448,7 @@ fn main() {
 ### Solution for message passing of `!Forget` types.
 [solution-to-self-referential-problem]: #solution-to-self-referential-problem
 
-One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. If we look at the depth of the problem, we can see that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature, because it creates a hidden self-reference. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
+One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. If we look at the problem in depth, we can see that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature, because it creates a hidden self-reference. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
 
 ```rust
 fn main() {
@@ -529,7 +529,7 @@ fn main() {
 }
 ```
 
-This code fails to compile too. Why? Because borrow checker detects a self reference! `handle` borrows `queue`, but we are moving `handle` into `queue`, thus `queue` borrows `queue`. This means we cannot call `drop` on queue or take a reference to it, but since `drop` is inserted by the compiler, we have an error. If there was a `loop {}` and borrow cheker considered diverging during analysis, it would compile, and would be sound.
+This code fails to compile too. Why? Because borrow checker detects a self-reference! `handle` borrows `queue`, but we are moving `handle` into `queue`, thus `queue` borrows `queue`. This means we cannot call `drop` on queue or take a reference to it, but since `drop` is inserted by the compiler, we have an error. If there was a `loop {}` and borrow cheker considered diverging during analysis, it would compile and would be sound.
 
 This means that to use message-passing with `!Forget` types, API authors must rely on lifetimes more - because `Forget` types fundamentally involve lifetime management. Looking at the example above, `rx` cannot be passed to the traditional `spawn`, because of the `F: 'static` requirement. But `thread::scope` allows it - as well as async `scope` does, with the future itself being `!Forget`. Note that rendezvous channels can be soundly expressed using that API and `PhantomData`.
 
@@ -790,5 +790,6 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 This RFC will allow `async` Rust to come closer to sync ergonomics, but some code will not be able to reach this end goal and insert "abort bombs" into mandatory destructors. This is strictly better than today's status quo: `unsafe` in application code, you can work with it, but this is not ideal. A more robust approach would be the `Linear`/`MustMove`/`!Drop` types. This RFC makes a step towards more liveness guarantees, making them closer. As for the biggest problem - unwinding - with `async`, we have more choice over our behavior during unwinds. Even if we do not succeed with effects forbidding unwinding, the future containing linear type may catch any unwind during the poll and return `Poll::Pending`, potentially recovering - `async Drop` looks promising too.
 
 Maybe if `!Forget` type borrows itself, it would be equivalent to the pinning?
+
 
 
