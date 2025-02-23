@@ -132,7 +132,7 @@ In sync Rust, necessary cleanup can be achieved by taking a closure/callback ins
 fn something_with_clean_up(f: impl FnOnce(Foo)) {
     // Setup.
     f(Foo);
-    // Cleaning. It is *guaranteed* to run, given the proper handling of unwinding.
+    // Cleanup. It is *guaranteed* to run, given the proper handling of unwinding.
 }
 
 fn main() {
