@@ -9,7 +9,7 @@
 # Summary
 [summary]: #summary
 
-Add a `Forget` marker trait indicating whether it is safe to skip the destructor before the type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and ecosystem.
+Add a `Forget` marker trait indicating whether it is safe to skip the destructor before the value of a type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and ecosystem.
 
 # Motivation
 [motivation]: #motivation
