@@ -96,7 +96,7 @@ The returned reference to the resource has the same lifetime as `self` (`'a`). T
 ```rust
 struct JoinHandle<'a>(/* ... */);
 
-impl Drop<'_> {
+impl Drop for JoinHandle<'_> {
     fn drop() {
         // Join the thread
     }
