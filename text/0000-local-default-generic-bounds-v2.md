@@ -33,14 +33,14 @@ fn foo<T: PartialEq + ?Sized>(t: &T) {}
 ## Use of `?Trait` bounds for new features
 [applicability-of-default-bounds]: #applicability-of-default-bounds
 
-A lot of new features (see [#use-cases](#use-cases)) require breaking old code by removing long-established assumptions like `size = stripe` or the ability to skip the destructor of a type. To avoid breaking the code, they create a new trait representing an assumption and then define their feature as types that do not implement this trait. Here `?Trait` bounds come in - old code has old assumptions, but new code can add `?Trait` to opt out of them and support more types.
+A lot of new features (see [#use-cases](#use-cases)) require breaking old code by removing long-established assumptions like `size = stride` or the ability to skip the destructor of a type. To avoid breaking the code, they create a new trait representing an assumption and then define their feature as types that do not implement this trait. Here `?Trait` bounds come in - old code has old assumptions, but new code can add `?Trait` to opt out of them and support more types.
 
 It is also important to note that in most cases those assumptions are not actually exercised by generic code, they are just already present in signatures - rarely code needs `size = stride`, or to skip the destructor (especially for a foreign type).
 
 ## The problem
 [problem-of-default-bounds]: #problem-of-default-bounds
 
-Quotes from "Size != Stripe" [Pre-RFC thread](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933):
+Quotes from "Size != Stride" [Pre-RFC thread](https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933):
 
 > In order to be backwards compatible, this change requires a new implicit trait bound, applied everywhere. However, that makes this change substantially less useful. If that became the way things worked forever, then `#[repr(compact)]` types would be very difficult to use, as almost no generic functions would accept them. Very few functions actually need `AlignSized`, but every generic function would get it implicitly.
 
