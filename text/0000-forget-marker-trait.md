@@ -173,7 +173,7 @@ async fn main() {
 }
 ```
 
-In this code snipped we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but it is not guaranteed. All `async` calls are turned into structs - like the RAII guards we talked about earlier:
+In this code snippet we added `async` modifiers to our functions, as well as `await`. You may think that cleanup will be done, but it is not guaranteed. All `async` calls are turned into structs - like the RAII guards we talked about earlier:
 
 ```rust
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
