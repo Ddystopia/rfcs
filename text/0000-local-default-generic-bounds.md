@@ -35,7 +35,7 @@ fn foo<T: PartialEq + ?Sized>(t: &T) {}
 
 A lot of new features (see [#use-cases](#use-cases)) require breaking old code by removing long-established assumptions like `size = stride` or the ability to skip the destructor of a type. To avoid breaking the code, they create a new trait representing an assumption and then define their feature as types that do not implement this trait. Here `?Trait` bounds come in - old code has old assumptions, but new code can add `?Trait` to opt out of them and support more types.
 
-It is also important to note that in most cases those assumptions are not actually exercised by generic code, they are just already present in signatures - rarely code needs `size = stride`, or to skip the destructor (especially for a foreign type).
+It is also important to note that in most cases those assumptions are not actually exercised by generic code, they are just already present in signatures - rarely code needs `size = stride`, or to skip the destructor (especially for a type from the foreign crate).
 
 ## The problem
 [problem-of-default-bounds]: #problem-of-default-bounds
