@@ -79,18 +79,12 @@ The syntax is to be bikeshedded, initially, it might be with a crate-level attri
 
 ```rust
 #![default_generic_bounds(Sized, ?Forget, PartialEq)]
-#![default_trait_bounds(?Sized, ?Forget, PartialEq)]
-#![default_assoc_bounds(Sized, ?Forget, PartialEq)]
-#![default_foreign_assoc_bounds(?Sized, ?Forget, PartialEq)]
 ```
 
-The following example demonstrates how the compiler will understand the code. (`PartialEq` is just for an illustration. Probably nobody would ever need to use this with `PartialEq`).
+The following example demonstrates how the compiler will understand the code. (`PartialEq` is used just for an illustration purposes. Probably nobody would ever need to use this with `PartialEq`. It may be a good decision to only allow a special set of traits, not arbitrary).
 
 ```rust
-#![default_generic_bounds(Sized, ?Forget, PartialEq)]
-#![default_trait_bounds(?Sized, ?Forget, PartialEq)]
-#![default_assoc_bounds(Sized, ?Forget, PartialEq)]
-#![default_foreign_assoc_bounds(?Sized, ?Forget, PartialEq)]
+#![default_generic_bounds(?Forget, PartialEq)]
 
 use std::ops::Deref;
 
@@ -119,18 +113,18 @@ Code above will desugar into this:
 ```rust
 use std::ops::Deref;
 
-trait Trait: Deref<Target: ?Sized + ?Forget + PartialEq> + ?PartialEq + ?Sized + ?Forget
+trait Trait: Deref<Target: ?Forget + PartialEq>
 {
-    type Assoc: Sized + Forget + PartialEq;
+    type Assoc: PartialEq;
 }
 
 struct Qux;
-struct Foo<T: Sized + ?Forget + PartialEq>(T);
-struct Bar<T: Sized + ?Forget + ?PartialEq>(T);
+struct Foo<T: ?Forget + PartialEq>(T);
+struct Bar<T: ?Forget + ?PartialEq>(T);
 struct Baz<'a, T>(T, &'a T::Target, T::Assoc)
 where
-    T: Sized + ?Forget + PartialEq,
-    T: Trait<Target: ?Sized + ?Forget + PartialEq, Assoc: Sized + Forget + PartialEq>
+    T: ?Forget + PartialEq,
+    T: Trait<Target: ?Forget + PartialEq, Assoc: Forget + PartialEq>
 ;
 
 impl Trait for &i32 {
@@ -156,14 +150,6 @@ With this RFC, transitioning to `Forget` is straightforward for any `#![forbid(u
 
 ```rust
 #![default_generic_bounds(?Forget)]
-#![default_trait_bounds(?Forget)]
-#![default_assoc_bounds(?Forget)]
-#![default_foreign_assoc_bounds(?Forget)]
-// or, equivalently, we can highlight the default choise of `Sized` behavior:
-#![default_generic_bounds(Sized, ?Forget)]
-#![default_trait_bounds(?Sized, ?Forget)]
-#![default_assoc_bounds(Sized, ?Forget)]
-#![default_foreign_assoc_bounds(?Sized, ?Forget)]
 ```
 
 2. Resolve any compilation errors by explicitly adding `+ Forget` where needed.
@@ -172,29 +158,26 @@ With this RFC, transitioning to `Forget` is straightforward for any `#![forbid(u
 
 Crates using `unsafe` code should beware of `ptr::write` and other unsafe ways of skipping destructors.
 
-## The Spirit of RFC: Why we need all four (generics, `Self` in traits and associated items)
-
-For generics it is simple enough: to avoid manually writing (multiple) `?Trait` bound *everywhere*, polluting the codebase with information that is not important, and generating a lot of boilerplate, resulting in the source gaining tens of kilobytes.
-
-For associated types and `Self` in traits the reason and solution are more subtle: even if we change generics in all functions in `std` to get `?Trait`, old code may rely on associated types implementing `Trait`, so we can't simply make them `?Trait`.
-
-We will not only set `?Trait` bound for associated types, but we will also desugar old code to have where clause restricting all foreign associated types and `Self` in traits to `Trait`. New code will add that trait to its defaults, easily opting in for that change (or manually writing `?Trait`).
-
-As this is in a Pre-RFC phase I invite everyone to see how the letter is deviating from the spirit and propose fixes 😊.
-
 ## Implications on the libraries
 
 ### Relax generic bound on public API
 
 For migrated users it is equivalent to semver's `minor` change, while not migrated uses will observe it as `patch` change.
 
-### Weakening associated type bound or `Self` bound in trait
+### Weakening associated type bound and `Self` bound in traits
 
-If user manually migrated, used a library that did not yet migrated and started relying on `T: Trait` bound, library would be breaking users if decides to change associated type bound to `?Trait`. One way around this, as discussed in the [`forget_marker_trait`] RFC, `default_trait_bounds` and `default_assoc_bounds` should become `?Trait` when `Trait` is introduced. Unless users manually change `default_generic_bounds` and `default_foreign_assoc_bounds`, this change is not observable. Thus, libraries would have `?Trait`, and then they would not be pressured into making a breaking change when transitioning from `type Asso: Trait` to `type Assoc: ?Trait`.
+Bounds for associated types and `Self` in traits would be weakened in respect to the new traits from the start:
+
+```rust
+trait Foo: ?Trait {
+    type Assoc: ?Trait;
+}
+```
+
+This change would not be observable for not migrated crates, because `default_generic_bounds` would default to `Trait`. But if users start migrate before libraries, they will not lock them into old bounds.
 
 ```rust
 #![default_generic_bounds(?Forget)]
-#![default_foreign_assoc_bounds(?Forget)]
 
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
@@ -213,14 +196,12 @@ mod other_crate {
 }
 ```
 
-In case of `std` 1 and 2 are mutually exclusive (rustc is 1:1 mapped with std), so no breaking is possible. But for regular crates the issue still remains, while only for the small fraction of the users, that are actively maintaining their code (unmaintained crates are not migrating).
-
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-Introduce four trait level attibutes: `default_generic_bounds`, `default_trait_bounds`, `default_assoc_bounds`, `default_foreign_assoc_bounds`, used to (non-exhaustively) enumerate overwrides of defaults for different types of bounds.
+Introduce new trait level attibute: `default_generic_bounds` used to (non-exhaustively) enumerate overwrides of defaults for different types of bounds.
 
-Every trait would initally have its unique default. In practice, bounds for all traits that are stable at the date of RFC except `Sized` would default to `?Trait`. In case of `Sized`, `default_generic_bound` and `default_assoc_bound` would be `Sized`, while `default_trait_bound`[^trait-not-sized-by-default] and `default_foreign_assoc_bound` would be `?Sized`. For new "breaking" traits, all four defaults would be `Trait`.
+Every trait would initally have its unique default. In practice, bounds for all traits that are stable at the date of RFC except `Sized` would default to `?Trait`. For new "breaking" traits, default would be `Trait`, except bounds for `Self` in traits and associated types in traits.
 
 [^trait-not-sized-by-default]: https://rust-lang.github.io/rfcs/0546-Self-not-sized-by-default.html
 
@@ -231,48 +212,23 @@ Every trait would initally have its unique default. In practice, bounds for all 
 Applied for generic parameters.
 
 ```rust
-
 fn foo<T: PartialEq + Sized>() {}
 struct Bar<T: PartialEq + Sized>(T);
 trait Baz<T: PartialEq + Sized> {
     type Qux<U: PartialEq + Sized>;
 }
-
-```
-
-### `default_trait_bounds`
-
-Applied for `Self` in traits.
-
-```rust
-trait Trait: PartialEq + ?Sized {}
-```
-
-###  `default_assoc_bounds`
-
-Applied for declarations of associated types in traits.
-
-```rust
-trait Trait {
-    type Assoc: PartialEq + Sized;
-}
-```
-
-### `default_foreign_assoc_bounds`
-
-Applied to constrain foreign associated types.
-
-```rust
-trait Trait: Deref<Target: PartialEq + ?Sized> {}
-```
-
-Rust compiler, at the moment of writing this RFC, treats this form differently from the following:
-
-```rust
 trait Trait: Deref
 where
     Self::Target: PartialEq + ?Sized
 {
+}
+
+fn bar<T: Async>()
+    where T::method(..): PartialEq + Sized
+{}
+
+trait Async {
+    fn method();
 }
 ```
 
@@ -280,7 +236,7 @@ where
 [drawbacks]: #drawbacks
 
 - It may make reading source files of crates harder, as the reader should first look at the top of the crate to see the defaults, and then remember them. It may increase cognitive load.
-- It may take some time for ecosystem around the language to fully adapt `!Trait` .
+- It may take some time for ecosystem around the language to fully adapt `!Trait`, but it will not be a breaking change.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
@@ -293,9 +249,16 @@ The impact of not accepting this RFC is that language features requiring types l
 [`!AlignSized`]: https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933
 
 ## Simplify the whole thing
-[maybe-just-simplify]: #maybe-just-simplify
+[split]: #split
 
-For the purposes of [`forget_marker_trait`] only `default_generic_bounds` and  `default_foreign_assoc_bounds` are used. `default_trait_bounds` and `default_assoc_bounds` are not utilized. Maybe merge `default_generic_bounds` and  `default_foreign_assoc_bounds` together and not provide equivalents for `default_trait_bounds` and `default_assoc_bounds`? That way there will only be 1 attribute. This is my personal favorite now, but this is already written so I would like to get some feedback :-)
+We may have four attributes: `default_generic_bounds`, `default_foreign_assoc_bounds`, `default_trait_bounds` and `default_assoc_bounds` for more fine-grained control over defaults. For example, `Sized` has following defaults:
+
+```rust
+#![default_generic_bounds(Sized)]
+#![default_trait_bounds(?Sized)]
+#![default_assoc_bounds(Sized)]
+#![default_foreign_assoc_bounds(?Sized)]
+```
 
 ## Alternative syntax
 [alternative-syntax]: #alternative-syntax
@@ -303,21 +266,7 @@ For the purposes of [`forget_marker_trait`] only `default_generic_bounds` and  `
 We may have a single macro to declare all bounds:
 
 ```rust
-declare_default_bounds! {
-    generic: Sized, ?Forget, PartialEq;
-    trait: ?Sized, ?Forget, PartialEq;
-    assoc: Sized, ?Forget, PartialEq;
-    foreign_assoc: ?Sized, ?Forget, PartialEq;
-};
-```
-
-Or have separate macros for this:
-
-```rust
-declare_default_generic_bounds!(Sized, ?Forget, PartialEq);
-declare_default_trait_bounds!(?Sized, ?Forget, PartialEq);
-declare_default_assoc_bounds!(Sized, ?Forget, PartialEq);
-declare_default_foreign_assoc_bounds!(?Sized, ?Forget, PartialEq);
+declare_default_bounds! { Sized, ?Forget, PartialEq };
 ```
 
 ## Use similar strategy of foreign associated types defaults, but over edition
@@ -334,7 +283,6 @@ It may be possible to use the same trick over an edition for traits that we want
 [unresolved-questions]: #unresolved-questions
 
 - [ ] Maybe only allow a special set of traits like `Sized`, `Forget` etc, but not traits like `PartialEq`.
-- [ ] Maybe go with [#maybe-just-simplify](#maybe-just-simplify)
 - [ ] Syntax
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
