@@ -448,7 +448,7 @@ fn main() {
 ### Solution for message passing of `!Forget` types.
 [solution-to-self-referential-problem]: #solution-to-self-referential-problem
 
-One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. If we look at the depth of the problem, we can see that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
+One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. If we look at the depth of the problem, we can see that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature, because it creates a hidden self-reference. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
 
 ```rust
 fn main() {
@@ -549,7 +549,7 @@ This new auto trait is added to the `core::marker` and `std::marker` modules:
 pub unsafe auto trait Forget { }
 ```
 
-Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types are not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection).  Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).
+Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types is not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection).  Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).
 
 [`Pin::static_ref`]: https://doc.rust-lang.org/std/pin/struct.Pin.html#method.static_ref
 
@@ -586,7 +586,7 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ## API changes
 [library-api-changes]: #library-api-changes
 
-- `Rc`/`Arc` - all APIs for construction,  except the new `Rc::new_unchecked` method, only exist for `T: Forget` types. In the future we *may* allow safe constructors for `T: ?Forget + 'static` (resources are borrowed for `'static`, it fulfills the guarantee we are giving to the unsafe code) and something along the lines of `T: ?Forget + Freeze` (to forbid cycles), author of the RFC is not familiar enough with interior mutability questions.
+- `Rc`/`Arc` - all APIs for construction,  except the new `Rc::new_unchecked` method, only exist for `T: Forget` types. If we decide to not have `impl<T: 'static> Forget for T {}`, in the future we *may* allow safe constructors for `T: ?Forget + 'static` (resources are borrowed for `'static`, it fulfills the guarantee we are giving to the unsafe code) and something along the lines of `T: ?Forget + Freeze` (to forbid cycles), author of the RFC is not familiar enough with interior mutability questions.
 - `ManuallyDrop<T>` always implements `Forget`, regardless of the `T`. `ManuallyDrop::new` is available for types with `T: Forget`.  New unsafe method `ManuallyDrop::new_unchecked`, available for `T: ?Forget`, is introduced. We may add a safe constructor with `T: ?Forget + 'static`, as we allow forgetting in statics.
 - `Box::<T>::into_ptr` is available only for `T: Forget`. As for `T: !Forget` users should `ManuallyDrop::new_unchecked` and take the pointer via `&raw mut`. It will still be allowed to pass this pointer to `Box::from_ptr`.
 - `Box::<T>::forget` is available only for `T: Forget`.
@@ -595,7 +595,7 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 - `Vec::drain` is available only for `T: Forget` types. A new method might be added to work with `T: ?Forget`.
 - APIs like `std::sync::mpsc::Sender::send` are available only for `T: Forget`.
 - Possibly new channels should be introduced, that are compatible with `T: !Forget` types too.
-- [ ] `Vec::set_len` is available only for `T: Forget` types, to not create a footgun for `unsafe` code in the wild. Maybe a new method should be added to support `T: ?Forget`.
+- `Vec::set_len` is available only for `T: Forget` types, to not create a footgun for `unsafe` code in the wild. Maybe a new method should be added to support `T: ?Forget`.
 
 ## Migration
 [migration]: #drawbacks
@@ -603,16 +603,33 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ### Migration using [`local_default_bounds`] RFC
 [local-defaults-migration]: #local-defaults-migration
 
-`local_default_bounds` RFC can help with making a migration smoother and does not require an edition. In a nutshell, it allows users to override default trait bounds, for example removing the `Sized` default, or adding the `MyFavouriteTrait` default.
+The local_default_bounds RFC facilitates a smoother migration without requiring an edition change. In essence, it allows users to override default trait bounds, such as removing the `Sized` default or adding a custom trait like `MyFavouriteTrait`.
 
-In terms of `local_default_bounds` RFC, together with adding the `Forget` trait, `default_trait_bounds` `default_assoc_bounds` should become `?Forget` instead of `Forget`. This is not observable for any code that is not opting into using `Forget` explicitly, as `default_generic_bounds` and `default_foreign_assoc_bounds` are still `Forget`. It will be discussed later in [#semver-and-ecosystem](#semver-and-ecosystem).
+We will provide an opt-in mechanism for crates to modify default bounds in function signatures.
 
-As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopting `?Forget` signatures will be a minor semver change at most. Thus, migration to `?Forget` would be equivalent to the currently accepted and stable `const fn`. Libraries are already adopting `const fn` and there is no notion against using `const` functions or ecosystem split - the ecosystem is migrating and PRs are being merged, making more and more functions `const`.
+```rust
+// Crate that has migrated
+mod migrated {
+    #![default_generic_bounds(?Forget)]
+    #![default_foreign_assoc_bounds(?Forget)]
+
+    fn foo<T>(value: T) { /* ... */ } // T: ?Forget
+}
+
+// Crate that has not migrated
+mod migrated {
+    fn foo<T>(value: T) { /* ... */ } // T: Forget
+}
+```
+
+In the context of the `local_default_bounds` RFC, along with introducing the `Forget` trait, `default_trait_bounds` and `default_assoc_bounds` should default to `?Forget` rather than `Forget`. This change is not observable for code that does not explicitly opt into using `Forget`, as `default_generic_bounds` and `default_foreign_assoc_bounds` will continue to default to `Forget`. A more detailed explanation will follow later.
+
+As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopting `?Forget` in their signatures will, at most, require a minor semver change. Consequently, migrating to `?Forget` would be equivalent to the now stable `const fn` feature. Libraries have already been adopting `const fn` without causing ecosystem fragmentation, as pull requests continue to be merged, progressively making more functions `const`.
 
 #### Not interested in migration crates
 [no-local-defaults-migration]: #no-local-defaults-migration
 
-Some crates may refuse to migrate due to being unmaintained, the only difference is that for downstream crates their signatures would be filled with `T: Forget`. This is only natural, as those crates were written with that assumption as if they manually put `T: Forget` on their signatures. Some automatic methods to determine that function can accept `Forget` types is not feasible because it can only work if only safe code is interacting with `T` and will be a semver hazard.
+Some crates may refuse to migrate due to being unmaintained, the only difference is that for downstream crates their signatures would be filled with `T: Forget`. This is only natural, as those crates were written with that assumption as if they manually put `T: Forget` on their signatures. Some automatic methods to determine that function can accept `Forget` types are not feasible because. It is a semver hazard and only safe code can touch `T`, as analysing `unsafe` code is against the design of the language.
 
 If the crate is maintained, however, migration should not be difficult.
 
@@ -622,7 +639,8 @@ If the crate is maintained, however, migration should not be difficult.
 1. Set the appropriate bounds:
 
 ```rust
-#![default_generic_bounds(?Forget)] // can be with `cfg_attr`
+// can be with `cfg_attr`
+#![default_generic_bounds(?Forget)]
 #![default_foreign_assoc_bounds(?Forget)]
 ```
 
@@ -674,17 +692,16 @@ mod other_crate {
 }
 ```
 
+#### Changing default
+
+It is not required, but in next editions we may swap the default for `default_generic_bounds` and `default_foreign_assoc_bounds`. Crates that want to continue using old default in next editions will set `#![default_generic_bounds(Forget)]` and `#![default_foreign_assoc_bounds(Forget)]`.
+
 ### Migration over the edition, with a mask
 [edition-migration-with-mask]: #edition-migration-with-mask
 
-We can have a satisfactory migration experience even without any additional language features. We may have editions <= 2024 have `Forget` as default, and editions after 2024 have `?Forget` as default.
+If [`local_default_bounds`] would not be accepted, we can have a satisfactory migration by having editions <= 2024 have `Forget` as default, and editions after 2024 have `?Forget` as default.
 
-While will not split the ecosystem, will require everyone to make migration a migration just as in the [`local_default_bounds`] solution. It can be automated for `#![forbid(unsafe)]` crates.
-
-### Manually mark almost every generic bound as `?Forget`
-[manual-migration]: #manual-migration
-
-This is a manual, tedious process, it will pollute the codebases with boilerplate and make them look awful and, therefore awful to maintain. Even more, associated types must remain `Forget`, as some code might rely on it, and removing that guarantee would be a breaking change. So this doesn't seem like a practical solution, we need a mechanism for some crates to observe `Forget` bound, and for others to not.
+While it will not split the ecosystem, it will require everyone to make a migration just as in the [`local_default_bounds`] solution. It can be automated for `#![forbid(unsafe)]` crates.
 
 # Drawbacks
 [drawbacks]: #drawbacks
@@ -703,7 +720,7 @@ lifetime connection between `tx` and `rx` handles.
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-All types were assumed to be `!Forget` in Rust's early days, and then it was changed in hurry. They flow naturally out of Rust's type system, do not clash with any preexisting concepts that do not directly involve forgetting and are very pleasant and intuitive to use, modulo migration. With the `Future` trait it became apparent that language directly lacks this feature, it is very simple and non-disturbing, so it's hard to find something that would fit that purpose better.
+All types were assumed to be `!Forget` in Rust's early days, and then it was changed in hurry. They flow naturally out of Rust's type system, do not clash with any preexisting concepts that do not directly involve forgetting and are used pleasantly and intuitively, modulo migration. With the `async` built around `Future` trait it became apparent that language directly lacks this feature. Being simple and non-disturbing, it's hard to find something that would fit that purpose better.
 
 We can do nothing, but use cases just keep piling up.
 
