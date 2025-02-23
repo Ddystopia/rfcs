@@ -325,7 +325,7 @@ let first_byte = resource[0]; // Potential UB
 
 Both `Forget` and `Pin` concepts serve a similar purpose - guaranteeing that some memory is not moved or repurposed. How `Forget` does it? If any resource is borrowed, you cannot take `&mut` reference to it, as it would be aliased by `!Forget` type that is borrowing from it. Before `!Forget` type goes out of scope, removing the borrow, its drop handler must be executed, just like `Pin`'s [drop guarantee]. So `!Unpin` protects directly owned memory, while `!Forget` protects *borrowed* memory.
 
-With `Forget`, some authors may have the option to borrow the data instead of owning it, making their futures `Unpin`, but `!Forget`.
+With `Forget`, some authors may have the option of borrowing data rather than owning it, making their futures `Unpin`, but `!Forget`.
 
 ## Core problem
 
@@ -350,16 +350,17 @@ fn main() {
 
     let handle = spawn(fut);
     std::mem::forget(handle);
+
     // `fut` might still be running in the background, but `buf` is no longer protected by the borrow checker.
 
-    // Undefined Behavior - aliasing mutable reference
+    // Undefined Behavior - aliasing a mutable reference.
     let fourth = buf[4];
 }
 ```
 
-In this case, `handle` borrows from `buf`, but the code that operating of `buf` is not directly tied to `handle`, but operates independently of it. Because of this, even if we pin `handle`, we still can *remove the borrow* (by ending the lifetime of `handle`) on `buf`, even if `JoinHandle`'s memory remains available (`forget(Box::pin(handle))`).
+In this case, `handle` borrows from `buf`, but the code that accessing `buf` is not directly tied to `handle`, it runs independently of it. Because of this, even if we pin `handle`, we still can *remove the borrow* (by ending the lifetime of `handle`) on `buf` while `JoinHandle`'s memory remains available (`forget(Box::pin(handle))`).
 
-Functions having signatures with weakening can skip the drop handler of a type. The following function is an example of a weakening function - after it is called, the borrow checker assumes that the lifetime of `T` has ended, as well as all borrows held by `T`.
+Functions having signatures with weakening can remove a type from the scope without running its destrucor. The following function is an example of a weakening function - after it is called, the borrow checker assumes that the lifetime of `T` has ended, as well as all borrows held by `T`.
 
 ```rust
 fn weakener<T>(foo: T) -> i32 {
@@ -374,7 +375,7 @@ Currently, many APIs are forced into using `'static` bounds, which is one of the
 ## Not only forgets
 [channels-unsoundness]: #channels-unsoundness
 
-There exists a way to exploit the old `thread::spawn` API without any memory leaks! We can move `JoinHandle` inside the thread it is meant to protect, creating a kind of cycle:
+There exists a way to exploit the old `thread::scoped` API without any memory leaks! We can move `JoinHandle` inside the thread it is meant to protect, creating a kind of cycle:
 
 ```rust
 use std::{
@@ -389,7 +390,7 @@ impl Drop for JoinHandle<'_> {
     fn drop(&mut self) {}
 }
 
-fn spawn<'a, F>(_f: F) -> JoinHandle<'a>
+fn scoped<'a, F>(_f: F) -> JoinHandle<'a>
 where
     F: FnOnce() -> (),
     F: Send + 'a,
@@ -404,7 +405,7 @@ fn main() {
     let mut buf = [0; 1024];
     let buf_ref = &mut buf;
 
-    let handle = spawn(move || {
+    let handle = scoped(move || {
         let _handle = arc2.lock().unwrap().take();
         for _ in 0..100000 {
             black_box(&mut *buf_ref);
@@ -420,7 +421,7 @@ fn main() {
 }
 ```
 
-In this code, no memory is leaked, and `JoinHandle`'s destructor is not skipped. Many kinds of channels, including rendezvous channels, have signatures replicable with reference counters - they are susceptible to this exploit as well:
+In this code, no memory is leaked, and `JoinHandle`'s destructor is not skipped. However, many types of channels - including rendezvous channels — can also be vulnerable to this issue if their signatures allows an equivalent implementation using reference counting.
 
 ```rust
 fn main() {
@@ -429,7 +430,7 @@ fn main() {
     let mut buf = [0; 1024];
     let buf_ref = &mut buf;
 
-    let handle = spawn(move || {
+    let handle = scoped(move || {
         let _handle = rx.recv().unwrap();
         for _ in 0..100000 {
             black_box(&mut *buf_ref);
@@ -447,7 +448,7 @@ fn main() {
 ### Solution for message passing of `!Forget` types.
 [solution-to-self-referential-problem]: #solution-to-self-referential-problem
 
-One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. By looking at the depth of an issue we can see, that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
+One might speculate and try to fix some holes, for example by making `JoinHandle: !Send`, but this can only count as a workaround. If we look at the depth of the problem, we can see that `Forget` is generally incompatible with `Rc`, as well as other APIs that can be expressed with its signature. In the example earlier, the borrow checker cannot see a connection between `rx` and `tx` - when `tx` is dropped, `buf` is no longer borrowed. What if retained such a connection?
 
 ```rust
 fn main() {
@@ -457,7 +458,7 @@ fn main() {
     let mut buf = [0; 1024];
     let buf_ref = &mut buf;
 
-    let handle = spawn(move || {
+    let handle = scoped(move || {
         let _handle = mutex_ref.lock().unwrap().take();
         for _ in 0..100000 {
             black_box(&mut *buf_ref);
@@ -465,41 +466,45 @@ fn main() {
     });
 
     mutex.lock().unwrap().replace(handle);
+    drop(mutex);
 
     buf[0] = 1;
 }
 ```
 
-And we got a compiler error, preventing the unsoundness:
+And we got a compiler error preventing the unsoundness:
 
 ```rust
- 1  error[E0597]: `mutex` does not live long enough
-   --> src/main.rs:23:21
-    |
- 22 |     let mutex = Mutex::new(None::<JoinHandle<'_>>);
-    |         ----- binding `mutex` declared here
- 23 |     let mutex_ref = &mutex;
-    |                     ^^^^^^ borrowed value does not live long enough
- ...
- 38 | }
-    | -
-    | |
-    | `mutex` dropped here while still borrowed
-    | borrow might be used here, when `mutex` is dropped and runs the destructor for type `Mutex<Option<JoinHandle<'_>>>`
+ error[E0597]: `mutex` does not live long enough
+  --> src/main.rs:23:21
+   |
+22 |     let mutex = Mutex::new(None);
+   |         ----- binding `mutex` declared here
+23 |     let mutex_ref = &mutex;
+   |                     ^^^^^^ borrowed value does not live long enough
+...
+40 | }
+   | -
+   | |
+   | `mutex` dropped here while still borrowed
+   | borrow might be used here, when `mutex` is dropped and runs the destructor for type `Mutex<Option<JoinHandle<'_>>>`
 
- 2  error[E0506]: cannot assign to `buf[_]` because it is borrowed
-   --> src/main.rs:37:5
-    |
- 26 |     let buf_ref = &mut buf;
-    |                   -------- `buf[_]` is borrowed here
- ...
- 37 |     buf[0] = 1;
-    |     ^^^^^^^^^^ `buf[_]` is assigned to here but it was already borrowed
- 38 | }
-    | - borrow might be used here, when `mutex` is dropped and runs the destructor for type `Mutex<Option<JoinHandle<'_>>>`
+error[E0505]: cannot move out of `mutex` because it is borrowed
+  --> src/main.rs:37:10
+   |
+22 |     let mutex = Mutex::new(None);
+   |         ----- binding `mutex` declared here
+23 |     let mutex_ref = &mutex;
+   |                     ------ borrow of `mutex` occurs here
+...
+37 |     drop(mutex);
+   |          ^^^^^
+   |          |
+   |          move out of `mutex` occurs here
+   |          borrow later used here
 ```
 
-This example is exactly like the first example with `Arc`, but uses references instead - we are allowed to pass them with `JoinHandle: !Forget`. But what with channels? There are not so many examples in the ecosystem that follow this approach in the API, as it is not `'static`, but there are some:
+This example is exactly like the first one with `Arc`, but uses references instead - we are allowed to pass them with `JoinHandle: !Forget`. But what with channels? There are not so many examples in the ecosystem that follow this approach in the signature, as it is not `'static`, but there are some:
 
 ```rust
 fn main() {
@@ -509,13 +514,14 @@ fn main() {
     let mut buf = [0; 1024];
     let buf_ref = &mut buf;
 
-    let handle = spawn(move || {
+    let handle = scoped(move || {
         let _handle = rx.dequeue();
         for _ in 0..100000 {
             black_box(&mut *buf_ref);
         }
     });
 
+    // Moving `handle` into `queue`, causing a self-referential borrow (`handle` -> `rx` -> `queue` -> `handle`).
     tx.enqueue(handle);
     drop(tx);
 
@@ -523,9 +529,9 @@ fn main() {
 }
 ```
 
-This code fails to compile too. Why? Because `tx` is connected to `queue` and `rx` is connected to `queue` too. After `tx` is dropped, `buf` remains borrowed by `handle` until the lifetime of `queue`. Can we drop `queue` then? We can't, because `rx` still borrows it, through the `handle`. This is clearly a cycle, and the borrow checker is able to catch it this time.
+This code fails to compile too. Why? Because borrow checker detects a self reference! `handle` borrows `queue`, but we are moving `handle` into `queue`, thus `queue` borrows `queue`. This means we cannot call `drop` on queue or take a reference to it, but since `drop` is inserted by the compiler, we have an error. If there was a `loop {}` and borrow cheker considered diverging during analysis, it would compile, and would be sound.
 
-This means that to use message-passing with `!Forget` types, API authors must rely on lifetimes more - because `Forget` types are all about lifetimes. Looking at the example above, `rx` cannot be passed to the traditional `spawn`, because of the `F: 'static` requirement. But `thread::scope` is fine with it - as well as async `scope` is, with the future itself being `!Forget`. Note that rendezvous channels can be soundly expressed using that API and `PhantomData`.
+This means that to use message-passing with `!Forget` types, API authors must rely on lifetimes more - because `Forget` types fundamentally involve lifetime management. Looking at the example above, `rx` cannot be passed to the traditional `spawn`, because of the `F: 'static` requirement. But `thread::scope` allows it - as well as async `scope` does, with the future itself being `!Forget`. Note that rendezvous channels can be soundly expressed using that API and `PhantomData`.
 
 ## Traditional combinators and patterns
 [traditional-workflows]: #traditional-workflows
@@ -580,7 +586,7 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ## API changes
 [library-api-changes]: #library-api-changes
 
-- `Rc`/`Arc` - all APIs for construction,  except the new `Rc::new_unchecked` method, only exist for `T: Forget` types. In the future we *may* allow safe constructors for `T: ?Forget + 'static` (resources are borrowed for `'static`, it fulfills the guarantee we are giving to the unsafe code) and something along the lines of `T: ?Forget + Freeze` (to forbid cycles), RFC author is not familiar enough with interior mutability questions.
+- `Rc`/`Arc` - all APIs for construction,  except the new `Rc::new_unchecked` method, only exist for `T: Forget` types. In the future we *may* allow safe constructors for `T: ?Forget + 'static` (resources are borrowed for `'static`, it fulfills the guarantee we are giving to the unsafe code) and something along the lines of `T: ?Forget + Freeze` (to forbid cycles), author of the RFC is not familiar enough with interior mutability questions.
 - `ManuallyDrop<T>` always implements `Forget`, regardless of the `T`. `ManuallyDrop::new` is available for types with `T: Forget`.  New unsafe method `ManuallyDrop::new_unchecked`, available for `T: ?Forget`, is introduced. We may add a safe constructor with `T: ?Forget + 'static`, as we allow forgetting in statics.
 - `Box::<T>::into_ptr` is available only for `T: Forget`. As for `T: !Forget` users should `ManuallyDrop::new_unchecked` and take the pointer via `&raw mut`. It will still be allowed to pass this pointer to `Box::from_ptr`.
 - `Box::<T>::forget` is available only for `T: Forget`.
