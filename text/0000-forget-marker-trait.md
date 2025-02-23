@@ -622,7 +622,7 @@ mod migrated {
 }
 ```
 
-In the context of the `local_default_bounds` RFC, along with introducing the `Forget` trait, Bounds for  `Self` and associated types should default to `?Forget` rather than `Forget`. This change is not observable for code that does not explicitly opt into using `Forget`, as `default_generic_bounds` and `default_foreign_assoc_bounds` will continue to default to `Forget`. A more detailed explanation will follow later.
+In the context of the `local_default_bounds` RFC, along with introducing the `Forget` trait, Bounds for  `Self` and associated types should default to `?Forget` rather than `Forget`. This change is not observable for code that does not explicitly opt into using `Forget`, as `default_generic_bounds` will continue to default to `Forget`. A more detailed explanation will follow later.
 
 As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopting `?Forget` in their signatures will, at most, require a minor semver change. Consequently, migrating to `?Forget` would be equivalent to the now stable `const fn` feature. Libraries have already been adopting `const fn` without causing ecosystem fragmentation, as pull requests continue to be merged, progressively making more functions `const`.
 
@@ -669,12 +669,13 @@ If the crate is maintained, however, migration should not be difficult.
 
 This approach is targeted at minimizing problems between different crates in the ecosystem. For any library, opting into using `Forget` and accepting those types will be a minor semver change.
 
-Earlier it was stated that `default_trait_bounds` and `default_assoc_bounds` should become `?Forget` instead of `Forget`. This is due to an important case. If a user of the library updated earlier than the library, then without that change it will observe that associated types of traits are `Forget`, so it would be a breaking change for the library to lift that constraint in the future. But now, the user will observe `?Forget`, thus it cannot rely on them being `Forget`. But for users that did not migrate, as well as the library itself, it will not be observable due to `default_generic_bounds` and `default_foreign_assoc_bounds` still being `Forget`.
+Earlier it was stated that Bounds for `Self` and associated types should default to `?Forget` instead of `Forget`. This is due to an important case. If a user of the library updated earlier than the library, then without that change it will observe that associated types of traits are `Forget`, so it would be a breaking change for the library to lift that constraint in the future. But now, the user will observe `?Forget`, thus it cannot rely on them being `Forget`. But for users that did not migrate, as well as the library itself, it will not be observable due to `default_generic_bounds` still being `Forget`.
 
 ```rust
+// This indicates that user explicity opted in
 #![default_generic_bounds(?Forget)]
-#![default_foreign_assoc_bounds(?Forget)]
 
+// After opting in, user needs to add `T::baz(..): Forget` to silence the error - quite easy.
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
     // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_assoc_bounds`
@@ -684,7 +685,8 @@ async fn foo<T: other_crate::Trait>(bar: T) {
     core::mem::forget(fut);
 }
 
-// `other_crate`
+// `other_crate` that did not migrate yet. `Trait::bar(..)` is not locked into `Forget`, but
+// this `other_crate` and other crates can only observe `Trait::bar(..): Forget` cases.
 mod other_crate {
     trait Trait {
         async fn baz();
@@ -694,7 +696,7 @@ mod other_crate {
 
 #### Changing default
 
-It is not required, but in next editions we may swap the default for `default_generic_bounds` and `default_foreign_assoc_bounds`. Crates that want to continue using old default in next editions will set `#![default_generic_bounds(Forget)]` and `#![default_foreign_assoc_bounds(Forget)]`.
+It is not required, but in next editions we may swap the default for `default_generic_bounds`. Crates that want to continue using old default in next editions will set `#![default_generic_bounds(Forget)]`.
 
 ### Migration over the edition, with a mask
 [edition-migration-with-mask]: #edition-migration-with-mask
