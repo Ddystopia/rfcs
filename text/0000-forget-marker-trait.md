@@ -9,7 +9,7 @@
 # Summary
 [summary]: #summary
 
-Add a `Forget` marker trait indicating whether is it safe to skip the destructor before the type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and crates.
+Add a `Forget` marker trait indicating whether is it safe to skip the destructor before the type exits the scope and basic utilities to work with `!Forget` types. Introduce a seamless migration route for the standard library and esosystem.
 
 # Motivation
 [motivation]: #motivation
@@ -17,7 +17,9 @@ Add a `Forget` marker trait indicating whether is it safe to skip the destructor
 Many readers may find the biggest problem with `Forget` to be migration.
 RFC's confidence is taken from the fact that migration can be done easily. See [#migration](#migration) section for details.
 
-Back in 2015, the decision was made to remove the `Drop` guarantee, making every type implicitly implement `Forget`. All APIs in `std` could've been preserved without it. Only one of them needed to be changed. Today is 2025, and some things changed, and old reasoning is no longer true.  This RFC is not targeted at resource leaks in general but is instead focused on allowing a number of APIs to become safe.
+Back in 2015, the [decision was made][safe-mem-forget] to make `mem::forget` safe, making every type implicitly implement `Forget`. All APIs in `std` could've been preserved after that change, except one. Today is 2025 and some things changed, old reasoning is no longer true. This RFC is not targeted at resource leaks in general but is instead focused on allowing a number of APIs to become safe by providing new unsafe guarantees.
+
+[safe-mem-forget]: https://github.com/rust-lang/rust/issues/24292
 
 ## What are RAII guards? [^raii]
 [raii-guards]: #raii-guards
@@ -26,81 +28,147 @@ Back in 2015, the decision was made to remove the `Drop` guarantee, making every
 
 RAII is a useful pattern for ensuring resources are properly deallocated or finalized. We can make use of the borrow checker in Rust to statically prevent errors stemming from using resources after finalization takes place.
 
+```rust
+use std::ops::Deref;
+
+struct Foo;
+
+struct Mutex<T> {
+    // `MutexGuard` is borrowing from here
+}
+
+struct MutexGuard<'a, T: 'a> {
+    data: &'a T,
+    // ...
+}
+
+impl<T> Mutex<T> {
+    fn lock(&self) -> MutexGuard<T> {
+        // Lock the underlying OS mutex.
+
+        // MutexGuard keeps a reference to self
+        MutexGuard {
+            data: self
+        }
+    }
+}
+
+// Destructor for unlocking the mutex.
+impl<'a, T> Drop for MutexGuard<'a, T> {
+    fn drop(&mut self) {
+        // Unlock the underlying OS mutex.
+    }
+}
+
+impl<'a, T> Deref for MutexGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.data
+    }
+}
+
+fn baz(x: Mutex<Foo>) {
+    let xx = x.lock();
+    xx.foo(); // foo is a method on Foo.
+              // The borrow checker ensures we can't store a reference to the underlying
+              // Foo which will outlive the guard xx.
+
+    // x is unlocked when we exit this function and xx's destructor is executed.
+}
+```
+
 The core aim of the borrow checker is to ensure that references to data do not outlive that data. The RAII guard pattern works because the guard object contains a reference to the underlying resource and only exposes such references. Rust ensures that the guard cannot outlive the underlying resource and that references to the resource mediated by the guard cannot outlive the guard. To see how this works it is helpful to examine the signature of deref without lifetime elision:
 
 ```rust
 fn deref<'a>(&'a self) -> &'a T {
-    //..
+    // ...
 }
 ```
 
 The returned reference to the resource has the same lifetime as `self` (`'a`). The borrow checker therefore ensures that the lifetime of the reference to `T` is shorter than the lifetime of `self`.
 
-## What is a proxy RAII guard?
+### What is a proxy RAII guard?
 [proxy-raii-guards]: #proxy-raii-guards
 
 `thread::scoped` is special because it uses the RAII guard as a proxy to represent other values, but this proxy is not used to access those values. Instead, we are trusting that the borrow checker will ensure that the guard cannot outlive those values, and therefore that joining the thread in the guard's destructor is enough to ensure that the spawned thread is no longer running. [^proxy-raii-guard-source]
+
+```rust
+struct JoinHandle<'a>(/* ... */);
+
+impl Drop<'_> {
+    fn drop() {
+        // Join the thread
+    }
+}
+
+let mut buffer = [0u8; 1024];
+
+let guard = thread::scoped(|| {
+    for i in 0..1000 {
+        bufffer[i] = i;
+    }
+});
+
+buffer[3] = 4; // Error: `buffer[_]` is assigned to here but it was already borrowed
+```
+
+As we can see, `buffer` is borrowed for a lifetime `'a`, until `guard` is live. But `buffer` is used inside another thread, not directly inside `JoinHandle<'a>`. Thus, `JoinHandle` is a *proxy* RAII guard, and its drop handler is used for then necessary cleanup.
 
 [^proxy-raii-guard-source]: https://github.com/rust-lang/rfcs/pull/1084#issuecomment-96875651
 
 ### Why is the proxy RAII guard gone?
 [proxy-raii-guards-leakpokaplipse]: #proxy-raii-guards-leakpokaplipse
 
-Back in 2015 [leakpocalypse] happened and a question was placed before the language: should we make skipping destructors safe or not? [PPYP] allows data structures to provide RAII guards while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too][thred-scope-doc].
+In 2015, the [leakpocalypse] happened, and the language faced the question: do we make it safe to skip destructors or not? [PPYP] allows data structures to provide RAII guards while being resilient to skipping the destructor. The only use case in std that cannot be expressed without destructor always running was `JoinGuard`, [which later got replaced too][thred-scope-doc].
 
 [leakpocalypse]: https://github.com/rust-lang/rust/issues/24292
 [PPYP]: https://cglab.ca/~abeinges/blah/everyone-poops/
 [thred-scope-doc]: https://doc.rust-lang.org/std/thread/fn.scope.html
 
-Instead of having a guarantee of the destructor running we can take a closure/callback instead of returning a guard object:
+In sync Rust, necessary cleanup can be achieved by taking a closure/callback instead of returning a guard object:
 
 ```rust
 fn something_with_clean_up(f: impl FnOnce(Foo)) {
-    // Setup
+    // Setup.
     f(Foo);
-    // Clean up. It is *guaranteed* to run, like destructors for variables in `Setup`.
-}
-```
-
-Thus, there was no point in redesigning the language and delaying Rust 1.0, practically all APIs and patterns could've been safely expressed without destructors always running, so making `std::mem::forget` safe was a good decision at the time.
-
-### What is different
-[what-is-different]: #what-is-different
-
-Edition 2018 introduced `async` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines which borrow some resources from outside or directly own them. It is user's responsibility to poll those state machines to completion. `!Forget` use cases could've been expressed by other means in sync Rust (like taking a callback instead of returning a guard or PPYP), but with `async`, anything turns directly into `impl Future + use<'a>` which is equivalent to the RAII guard.
-
-Various OS or C/C++ APIs cannot be made `async` without performance or ergonomics costs. PPYP can work for `Drain<'a>`, but not for `io_uring`. As long as the future directly owns (or is `'static`) all data it is accessing `Pin` guarantees are sufficient. Otherwise, there is no way to make a sound API.
-
-Let's try to translate the previous example, a widely used pattern, to `async` Rust. Here is more elaborated sync example:
-
-```rust
-fn something_with_clean_up(f: impl FnOnce(Foo)) {
-    // setup
-    f(Foo);
-    // clean up
+    // Cleaning. It is *guaranteed* to run, given the proper handling of unwinding.
 }
 
 fn main() {
     something_with_clean_up(|foo| {
         foo.bar();
     });
+
     // rest of the code...
 }
 ```
 
-As you can see, after calling `something_with_clean_up`, the control flow is passed to the library. The rest of the user's code *cannot* continue executing before `something_with_clean_up` performs a cleanup (assuming unwinding is handled properly).
+As you can see, after calling `something_with_clean_up`, the control flow is passed to the library. The rest of the user's code *cannot* continue executing before `something_with_clean_up` performs a cleanup.
+
+Thus, there was no point in redesigning the language and delaying Rust 1.0, practically all APIs and patterns could be safely expressed without destructors always running, so making `std::mem::forget` safe was a good decision at the time.
+
+## What is different
+[what-is-different]: #what-is-different
+
+Edition 2018 introduced `async` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines which borrow some resources from outside or directly own them. It is user's responsibility to poll those state machines to completion. `!Forget` use cases could've been expressed by other means in sync Rust (like taking a callback instead of returning a guard or PPYP), but with `async`, anything turns directly into `impl Future + use<'a>` which is equivalent to the RAII guard. This means, that sync pattern of taking a closure cannot be used - everything is transformed into RAII guard by the compiler.
+
+Various OS or C/C++ APIs cannot be made `async` without performance or ergonomics costs. PPYP can work for `Drain<'a>`, but not for `io_uring`. As long as the future is `'static` or directly owns all data it is accessing, `Pin` guarantees are sufficient. Otherwise, there is no way to make a sound API.
+
+Let's try to translate the previous example, a widely used pattern, to `async` Rust.
 
 ```rust
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
     // setup
     f(Foo).await;
-    // clean up
+    // cleanup
 }
 
 async fn main() {
     something_with_clean_up(|foo| {
         foo.bar();
     }).await;
+
     // rest of the code...
 }
 ```
@@ -121,17 +189,17 @@ async fn main() {
     {
         let pinned = Box::pin(fut);
         poll_fn(|cx| Poll::Ready(_ = pinned.poll(cx))).await;
-        forget(pinned);
+        forget(pinned); // or `_ = Box::leak(pinned);`
     }
     // rest of the code...
 }
 ```
 
-The library is only taking control flow in between `await` points. Here, future is pinned and [Pin]'s [drop guarantee] is met (boxed future remains allocated for `'static`), but cleanup cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system and other C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
+The library is only taking control flow in between `await` points. Here, future is pinned and `Pin`'s [drop guarantee] is met (boxed future remains allocated for `'static`), but cleanup cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system APIs and C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
 
 [drop guarantee]: https://doc.rust-lang.org/std/pin/#drop-guarantee
 
-Another important observation that we can make is that `Pin`'s drop guarantee only applies to the memory of the `Future` itself. But if `Future` borrows a buffer, it *can* be deallocated or re-used before the `drop` of the `Future` is called. See [#connection-to-pin](#connection-to-pin).
+Another important observation that we can make is that `Pin`'s drop guarantee only applies to the memory of the `Future` itself. But if `Future` borrows a buffer, that buffer *can* be deallocated or re-used before the `drop` of the `Future` is called. See [#connection-to-pin](#connection-to-pin).
 
 ## Examples of unsafe async APIs that can be allowed in sync Rust
 [example-safe-sync-unsafe-async]: #example-safe-sync-unsafe-async
@@ -152,7 +220,8 @@ struct TaskHandler<'a>(u64, PhantomNonForget, PhantomData<&'a ()>);
 impl Drop for TaskHandler<'_> {
     fn drop(&mut self) {
         if let Some(mut mutex) = GLOBAL.get(self.0) {
-            // We can block in async context as this mutex is held during the `poll` which should return in a timely manner.
+            // We can block in async context as this mutex is held
+            // during the `poll` which should return in a timely manner.
             let fut = mutex.lock();
             // cancel the future and call its drop handler
             drop(fut.take())
@@ -160,6 +229,8 @@ impl Drop for TaskHandler<'_> {
     }
 }
 
+// Note that this is basically equivalent to async `scope`, as async `scope`
+// would be transformed into the `Future` struct, just like `TaskHandler`.
 fn spawn<'a>(fut: impl IntoFuture + 'a) -> TaskHandler<'a> {
     GLOBAL.spawn(fut)
 }
@@ -176,7 +247,6 @@ Let's say that `Serial::read_exact` triggers a DMA transfer and returns a future
 fn start(serial: &mut Serial) {
     let mut buf = [0; 16];
 
-    // not `unsafe`!
     mem::forget(serial.read_exact(&mut buf));
 }
 
@@ -204,13 +274,7 @@ See [blog.japaric.io/safe-dma] for more.
 
 [`async-cuda`]: https://crates.io/crates/async-cuda
 
-> Internally, the Future type in this crate schedules a CUDA call on a separate runtime thread. To make the API as ergonomic as possible, the lifetime bounds of the closure (that is sent to the runtime) are tied to the future object. To enforce this bound, the future will block and wait if it is dropped. This mechanism relies on the future being driven to completion, and not forgotten. This is not necessarily guaranteed. Unsafety may arise if either the runtime gives up on or forgets the future, or the caller manually polls the future, then forgets it.
-
-### `take_mut`
-
-The async version of [`take_mut`] cannot be created as it relies on cleanup code to abort the program.
-
-[`take_mut`]: https://docs.rs/take_mut/latest/take_mut/
+> Internally, the `Future` type in this crate schedules a CUDA call on a separate runtime thread. To make the API as ergonomic as possible, the lifetime bounds of the closure (that is sent to the runtime) are tied to the future object. To enforce this bound, the future will block and wait if it is dropped. This mechanism relies on the future being driven to completion, and not forgotten. This is not necessarily guaranteed. Unsafety may arise if either the runtime gives up on or forgets the future, or the caller manually polls the future, then forgets it.
 
 ### `io_uring`
 [example-async-io_uring]: #example-async-io_uring
@@ -223,12 +287,18 @@ The async version of [`take_mut`] cannot be created as it relies on cleanup code
 
 [`ringbahn`]: https://github.com/ringbahn/ringbahn/
 [`tokio_uring`]: https://docs.rs/tokio-uring/latest/tokio_uring/
-[`rio`]: https://lib.rs/crates/rio
+[`rio`]: https://lib.rs/crates/rio/
+
+### `take_mut`
+
+The async version of [`take_mut`] cannot be created as it relies on cleanup code to abort the program.
+
+[`take_mut`]: https://docs.rs/take_mut/latest/take_mut/
 
 ### C/C++ bindings + async do not work well together
 [example-async-c-cpp-bindings]: #example-async-c-cpp-bindings
 
-It is very common for C/C++ APIs to require some cleanup. It is not an issue for `sync` rust, as wrappers can just take a closure/callback and ensure that cleanup. But all `async` calls are transformed into `impl Future + use<'a>`, not passing control flow to the wrapper. `io_uring` and `async-cuda` fall into that category too. For embedded/kernel development this issue is even worse, as you often cannot afford an allocation due to lack of resources or complex locking, making borrows your only option and making `Pin`'s drop guarantee not useful for you.
+It is common for C/C++ APIs to require some cleanup. It is not an issue for `sync` rust, as wrappers can just take a closure/callback and ensure that cleanup. But all `async` calls are transformed into `impl Future + use<'a>`, not passing control flow to the wrapper. `io_uring` and `async-cuda` fall into that category too. For embedded/kernel development this issue is even worse, as you often cannot afford an allocation due to the lack of resources or complex locking, making borrows your only option and making `Pin`'s drop guarantee not useful for you.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -648,7 +718,7 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 ## Leakpocalypse
 [leakpocalypse-prior-art]: #leakpocalypse-prior-art
 
-- https://github.com/rust-lang/rfcs/pull/3680
+- https://github.com/rust-lang/rfcs/pull/1066
 - https://github.com/rust-lang/rust/issues/24292
 - https://cglab.ca/~abeinges/blah/everyone-poops/
 - https://github.com/rust-lang/rfcs/pull/1085
