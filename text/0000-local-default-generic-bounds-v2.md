@@ -81,7 +81,7 @@ The syntax is to be bikeshedded, initially, it might be with a crate-level attri
 #![default_generic_bounds(?Forget, PartialEq)]
 ```
 
-The following example demonstrates how the compiler will understand the code. `PartialEq` is used just for an illustration purposes. In reality, only a special set of traits would be allowed and would grow with new "breaking" traits, like `Forget`. `PartialEq` would not be one of them.
+The following example demonstrates how the compiler will understand the code. `PartialEq` is used just for illustration purposes. In reality, only a special set of traits would be allowed and would grow with new "breaking" traits, like `Forget`. `PartialEq` would not be one of them.
 
 ```rust
 #![default_generic_bounds(?Forget, PartialEq)]
@@ -236,7 +236,7 @@ trait Async {
 [drawbacks]: #drawbacks
 
 - It may make reading source files of crates harder, as the reader should first look at the top of the crate to see the defaults, and then remember them. It may increase cognitive load.
-- It may take some time for ecosystem around the language to fully adapt `!Trait`, but it will not be a breaking change.
+- It may take some time for the ecosystem around the language to fully adapt `!Trait`, but it will not be a breaking change.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
