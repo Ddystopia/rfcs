@@ -165,8 +165,8 @@ async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
 }
 
 async fn main() {
-    something_with_clean_up(|foo| {
-        foo.bar();
+    something_with_clean_up(async |foo| {
+        foo.bar().await;
     }).await;
 
     // rest of the code...
@@ -183,8 +183,8 @@ async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
 }
 
 async fn main() {
-    let fut = something_with_clean_up(|foo| {
-        foo.bar();
+    let fut = something_with_clean_up(async |foo| {
+        foo.bar().await;
     });
     {
         let pinned = Box::pin(fut);
