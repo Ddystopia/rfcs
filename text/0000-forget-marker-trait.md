@@ -19,7 +19,7 @@ RFC's confidence is taken from the fact that migration can be done easily. See [
 
 Back in 2015, the [decision was made][safe-mem-forget] to make `mem::forget` safe, making every type implicitly implement `Forget`. All APIs in `std` could've been preserved after that change, except one. Today is 2025 and some things changed, old reasoning is no longer true. This RFC is not targeted at resource leaks in general but is instead focused on allowing a number of APIs to become safe by providing new unsafe guarantees.
 
-[safe-mem-forget]: https://github.com/rust-lang/rust/issues/24292
+[safe-mem-forget]: https://github.com/rust-lang/rfcs/pull/1066
 
 ## What are RAII guards? [^raii]
 [raii-guards]: #raii-guards
