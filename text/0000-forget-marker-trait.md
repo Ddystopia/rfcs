@@ -104,6 +104,7 @@ impl Drop for JoinHandle<'_> {
 
 let mut buffer = [0u8; 1024];
 
+// `guard` is now borrowing from `buffer`
 let guard = thread::scoped(|| {
     for i in 0..1000 {
         bufffer[i] = i;
@@ -187,7 +188,9 @@ async fn main() {
         foo.bar().await;
     });
     {
+        // Pin the future.
         let pinned = Box::pin(fut);
+        // Poll the future once.
         poll_fn(|cx| Poll::Ready(_ = pinned.poll(cx))).await;
         forget(pinned); // or `_ = Box::leak(pinned);`
     }
@@ -195,7 +198,7 @@ async fn main() {
 }
 ```
 
-The library is only taking control flow in between `await` points. Here, future is pinned and `Pin`'s [drop guarantee] is met (boxed future remains allocated for `'static`), but cleanup cannot run. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system APIs and C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
+The library is only taking control flow in between `await` points. Here, future is pinned and `Pin`'s [drop guarantee] is met (boxed future remains allocated for `'static`), but cleanup cannot run - `Drop` handler of `fut` is skipped. Thus, APIs that require any cleanup for safety can be expressed in `sync` Rust, but not in `async` Rust, making `async` less attractive, as the operating system APIs and C/C++ libraries *cannot* be used efficiently, ergonomically, and safely.
 
 [drop guarantee]: https://doc.rust-lang.org/std/pin/#drop-guarantee
 
@@ -315,7 +318,9 @@ let mut resource = [0u8; 1024];
 
 let borrower: Borrower<'_> = Borrower::new(&mut resource);
 
-std::mem::forget(borrower); // Violation of the unsafe contract - `resource` is no longer borrowed, so repurposing protected memory is safe.
+// Violation of the unsafe contract - `resource` is no longer borrowed,
+// so repurposing protected memory is safe.
+std::mem::forget(borrower); 
 
 let first_byte = resource[0]; // Potential UB
 ```
