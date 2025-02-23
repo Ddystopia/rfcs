@@ -81,7 +81,7 @@ The syntax is to be bikeshedded, initially, it might be with a crate-level attri
 #![default_generic_bounds(Sized, ?Forget, PartialEq)]
 ```
 
-The following example demonstrates how the compiler will understand the code. (`PartialEq` is used just for an illustration purposes. Probably nobody would ever need to use this with `PartialEq`. It may be a good decision to only allow a special set of traits, not arbitrary).
+The following example demonstrates how the compiler will understand the code. `PartialEq` is used just for an illustration purposes. In reality, only a special set of traits would be allowed and would grow with new "breaking" traits, like `Forget`. `PartialEq` would not be one of them.
 
 ```rust
 #![default_generic_bounds(?Forget, PartialEq)]
@@ -282,7 +282,6 @@ It may be possible to use the same trick over an edition for traits that we want
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- [ ] Maybe only allow a special set of traits like `Sized`, `Forget` etc, but not traits like `PartialEq`.
 - [ ] Syntax
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
