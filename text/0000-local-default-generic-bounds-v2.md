@@ -248,7 +248,7 @@ The impact of not accepting this RFC is that language features requiring types l
 
 [`!AlignSized`]: https://internals.rust-lang.org/t/pre-rfc-allow-array-stride-size/17933
 
-## Simplify the whole thing
+## Add fine-grained attributes
 [split]: #split
 
 We may have four attributes: `default_generic_bounds`, `default_foreign_assoc_bounds`, `default_trait_bounds` and `default_assoc_bounds` for more fine-grained control over defaults. For example, `Sized` has following defaults:
