@@ -78,7 +78,7 @@ The expected outcome is an open road for new language features to enter the lang
 The syntax is to be bikeshedded, initially, it might be with a crate-level attributes.
 
 ```rust
-#![default_generic_bounds(Sized, ?Forget, PartialEq)]
+#![default_generic_bounds(?Forget, PartialEq)]
 ```
 
 The following example demonstrates how the compiler will understand the code. `PartialEq` is used just for an illustration purposes. In reality, only a special set of traits would be allowed and would grow with new "breaking" traits, like `Forget`. `PartialEq` would not be one of them.
@@ -259,6 +259,8 @@ We may have four attributes: `default_generic_bounds`, `default_foreign_assoc_bo
 #![default_assoc_bounds(Sized)]
 #![default_foreign_assoc_bounds(?Sized)]
 ```
+
+Previous version of this RFC was exactly this, you can read it [here](https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-local-default-generic-bounds.md).
 
 ## Alternative syntax
 [alternative-syntax]: #alternative-syntax
