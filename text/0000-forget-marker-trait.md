@@ -151,7 +151,7 @@ Thus, there was no point in redesigning the language and delaying Rust 1.0, prac
 ## What is different
 [what-is-different]: #what-is-different
 
-Edition 2018 introduced `async` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines which borrow some resources from outside or directly own them. It is user's responsibility to poll those state machines to completion. `!Forget` use cases could've been expressed by other means in sync Rust (like taking a callback instead of returning a guard or PPYP), but with `async`, anything turns directly into `impl Future + use<'a>` which is equivalent to the RAII guard. This means, that sync pattern of taking a closure cannot be used - everything is transformed into RAII guard by the compiler.
+Edition 2018 introduced `async` Rust. But as turned out, nuances in its design conflicted with an earlier decision. All `async` calls are essentially constructors for state machines which borrow some resources from outside or directly own them. It is user's responsibility to poll those state machines to completion. `!Forget` use cases could've been expressed by other means in sync Rust (like taking a callback instead of returning a guard or [PPYP]), but with `async`, anything turns directly into `impl Future + use<'a>` which is equivalent to the RAII guard. This means, that sync pattern of taking a closure cannot be used - everything is transformed into RAII guard by the compiler.
 
 Various OS or C/C++ APIs cannot be made `async` without performance or ergonomics costs. PPYP can work for `Drain<'a>`, but not for `io_uring`. As long as the future is `'static` or directly owns all data it is accessing, `Pin` guarantees are sufficient. Otherwise, there is no way to make a sound API.
 
@@ -179,7 +179,7 @@ In this code snippet we added `async` modifiers to our functions, as well as `aw
 async fn something_with_clean_up(f: impl AsyncFnOnce(Foo)) {
     // setup
     f(Foo).await;
-    // clean up
+    // cleanup
 }
 
 async fn main() {
