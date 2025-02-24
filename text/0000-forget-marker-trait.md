@@ -4,7 +4,7 @@
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
 <!-- todo: Replace with RFC PR later -->
-[`local_default_bounds`]: https://github.com/Ddystopia/rfcs/blob/leak-marker-trait-and-local-default-bounds/text/0000-local-default-generic-bounds-v2.md
+[`local_default_bounds`]: https://internals.rust-lang.org/t/pre-rfc-local-default-bounds/22453
 
 # Summary
 [summary]: #summary
@@ -328,7 +328,7 @@ let first_byte = resource[0]; // Potential UB
 ## How is `Forget` related to `Pin`?
 [connection-to-pin]: #connection-to-pin
 
-Both `Forget` and `Pin` concepts serve a similar purpose - guaranteeing that some memory is not moved or repurposed. How `Forget` does it? If any resource is borrowed, you cannot take `&mut` reference to it, as it would be aliased by `!Forget` type that is borrowing from it. Before `!Forget` type goes out of scope, removing the borrow, its drop handler must be executed, just like `Pin`'s [drop guarantee]. So `!Unpin` protects directly owned memory, while `!Forget` protects *borrowed* memory.
+Both `Forget` and `Pin` concepts serve a similar purpose - guaranteeing that some memory is not moved or repurposed. How `Forget` does it? If any resource is borrowed, you cannot take `&mut` reference to it, as it would be aliased by `!Forget` type that is borrowing from it. Before `!Forget` type goes out of scope, removing the borrow, its drop handler must be executed, just like `Pin`'s [drop guarantee]. So `!Unpin` protects directly owned memory, while `!Forget` protects *borrowed* memory. It is important to note that `Forget` is not defined around memory, but around values - see [#reference-level-explanation](#reference-level-explanation).
 
 With `Forget`, some authors may have the option of borrowing data rather than owning it, making their futures `Unpin`, but `!Forget`.
 
@@ -554,11 +554,51 @@ This new auto trait is added to the `core::marker` and `std::marker` modules:
 pub unsafe auto trait Forget { }
 ```
 
-Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types is not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection).  Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).
+Let `T` be `T: !Forget` and `value` be a value borrowed by value of type `T`. Unsafe code is given the following guarantees:
+
+- If `value` is borrowed by `T` as `&mut`, `value` cannot be moved/invalidated/borrowed until `T` is dropped.
+- If `value` is borrowed by `T` as `&`, `value` cannot be moved/invalidated/exclusively borrowed until `T` is dropped.
+
+In practice, we disallow skipping the destructor of `!Forget` types before they exit the scope. Violation is not an immediate undefined behavior, but other code can rely on the destructor running, which can lead to undefined behavior down the road. Unsafe code authors can freely violate this rule, if responsibility is taken.
+
+Several observations can be made about this guarantee. For `T: 'static` we don't have to run the destructor to fulfill it, as `T: 'static` can only have `'static` borrows, which are assumed to be valid indefinite borrows (like with [`Pin::static_ref`]). Another one is, memory borrowed by  `T: !Forget` type cannot be reused or invalidated, as safe code needs to move/take a reference to `value`, similar to the [drop guarantee]. `value` cannot be dropped, as it requires moving.
+
+```rust
+struct Foo<T>(PhantomNonForget, T);
+struct Baz;
+
+impl<T> Drop for Foo<T> { fn drop(&mut self) { } }
+
+let ref_buf = [0u8; 64];
+let mut_buf = [0u8; 64];
+
+// We have a guarantee, that no `&mut` can be taken to `ref_buf` until `Foo`'s `drop`.
+let foo_ref = Foo(PhantomNonForget, &ref_buf);
+// We have a guarantee, that no `&/&mut` can be taken to `ref_buf` until `Foo`'s `drop`.
+let foo_mut = Foo(PhantomNonForget, &mut ref_buf);
+
+drop(ref_buf); // error[E0505]: cannot move out of `ref_buf` because it is borrowed
+drop(mut_buf); // error[E0505]: cannot move out of `mut_buf` because it is borrowed
+
+let ref_first_byte = ref_buf.0[0]; // Allowed
+let mut_first_byte = mut_buf.0[0]; // error[E0503]: cannot use `mut_buf.0[_]` because it was mutably borrowed
+
+drop(foo_ref);
+drop(foo_mut);
+
+let mut_first_byte = mut_buf.0[0]; // Allowed
+drop(foo_ref); // Allowed
+drop(foo_mut); // Allowed
+
+// `Baz` cannot be moved or exclusively borrowed until `Foo` is dropped.
+fn phantom<'a>(baz: &'a Baz) -> Foo<PhantomData<&'a ()>> {
+    Foo(PhantomNonForget, PhantomData)
+}
+```
+
+~~Previous version: Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types is not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection). Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).~~
 
 [`Pin::static_ref`]: https://doc.rust-lang.org/std/pin/struct.Pin.html#method.static_ref
-
-In practice, we disallow skipping the destructor of `!Forget` types before they exit the scope. Violation is not an immediate undefined behavior, but other code can rely on the destructor running, which can lead to undefined behavior down the road.
 
 Type becomes `!Forget` if it directly contains `!Forget` member.
 
@@ -616,7 +656,6 @@ We will provide an opt-in mechanism for crates to modify default bounds in funct
 // Crate that has migrated
 mod migrated {
     #![default_generic_bounds(?Forget)]
-    #![default_foreign_assoc_bounds(?Forget)]
 
     fn foo<T>(value: T) { /* ... */ } // T: ?Forget
 }
@@ -634,7 +673,7 @@ As discussed in [#semver-and-ecosystem](#semver-and-ecosystem), libraries adopti
 #### Not interested in migration crates
 [no-local-defaults-migration]: #no-local-defaults-migration
 
-Some crates may refuse to migrate due to being unmaintained, the only difference is that for downstream crates their signatures would be filled with `T: Forget`. This is only natural, as those crates were written with that assumption as if they manually put `T: Forget` on their signatures. Some automatic methods to determine that function can accept `Forget` types are not feasible because. It is a semver hazard and only safe code can touch `T`, as analysing `unsafe` code is against the design of the language.
+Some crates may refuse to migrate due to being unmaintained, the only difference is that for downstream crates their signatures would be filled with `T: Forget`. This is only natural, as those crates were written with that assumption as if they manually put `T: Forget` on their signatures. Some automatic methods to determine that function can accept `Forget` types are not feasible. We are already not doing it for `const fn`, it would be a semver hazard and only safe code can touch `T`, as analysing `unsafe` code is against the design of the language.
 
 If the crate is maintained, however, migration should not be difficult.
 
@@ -646,7 +685,6 @@ If the crate is maintained, however, migration should not be difficult.
 ```rust
 // can be with `cfg_attr`
 #![default_generic_bounds(?Forget)]
-#![default_foreign_assoc_bounds(?Forget)]
 ```
 
 2. Resolve any compilation errors by explicitly adding `+ Forget` where needed.
@@ -660,7 +698,6 @@ If the crate is maintained, however, migration should not be difficult.
 
 ```rust
 #![default_generic_bounds(?Forget)]
-#![default_foreign_assoc_bounds(?Forget)]
 ```
 
 2. Audite your codebase to work properly with `!Forget` types.
@@ -683,8 +720,8 @@ Earlier it was stated that Bounds for `Self` and associated types should default
 // After opting in, user needs to add `T::baz(..): Forget` to silence the error - quite easy.
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
-    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_assoc_bounds`
-    // to `?Forget`, and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
+    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_bounds`
+    // to `?Forget`, and default for associated types in `other_crate` is already `?Forget`. Otherwise it
     // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
     // as this code would've compiled now but not in the future.
     core::mem::forget(fut);
@@ -795,6 +832,4 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 This RFC will allow `async` Rust to come closer to sync ergonomics, but some code will not be able to reach this end goal and insert "abort bombs" into mandatory destructors. This is strictly better than today's status quo: `unsafe` in application code, you can work with it, but this is not ideal. A more robust approach would be the `Linear`/`MustMove`/`!Drop` types. This RFC makes a step towards more liveness guarantees, making them closer. As for the biggest problem - unwinding - with `async`, we have more choice over our behavior during unwinds. Even if we do not succeed with effects forbidding unwinding, the future containing linear type may catch any unwind during the poll and return `Poll::Pending`, potentially recovering - `async Drop` looks promising too.
 
 Maybe if `!Forget` type borrows itself, it would be equivalent to the pinning?
-
-
 
