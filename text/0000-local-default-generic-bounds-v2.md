@@ -181,14 +181,14 @@ This change would not be observable for not migrated crates, because `default_ge
 
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
-    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_assoc_bounds`
+    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_generic_bounds`
     // to `?Forget`, and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
     // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
     // as this code would've compiled now but not in the future.
     core::mem::forget(fut);
 }
 
-// `other_crate`
+// Libary that has not migrated yet.
 mod other_crate {
     trait Trait {
         async fn baz();
@@ -199,7 +199,7 @@ mod other_crate {
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-Introduce new trait level attibute: `default_generic_bounds` used to (non-exhaustively) enumerate overwrides of defaults for different types of bounds.
+Introduce new trait level attibute: `default_generic_bounds` used to (non-exhaustively) enumerate overwrides of defaults for different types of bounds. Only a special set of traits would be allowed and would grow with new "breaking" traits, like `Forget`.
 
 Every trait would initally have its unique default. In practice, bounds for all traits that are stable at the date of RFC except `Sized` would default to `?Trait`. For new "breaking" traits, default would be `Trait`, except bounds for `Self` in traits and associated types in traits.
 
@@ -228,7 +228,7 @@ fn bar<T: Async>()
 {}
 
 trait Async {
-    fn method();
+    async fn method();
 }
 ```
 
@@ -288,6 +288,8 @@ It may be possible to use the same trick over an edition for traits that we want
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
 - [ ] Maybe use the term "implicit" instead of "default".
+- [ ] Should we allow `Sized`.
+- [ ] Maybe have 4 different attributes for more fine-grained control?
 
 # Shiny future we are working towards
 

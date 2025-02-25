@@ -14,8 +14,7 @@ Add a `Forget` marker trait indicating whether it is safe to skip the destructor
 # Motivation
 [motivation]: #motivation
 
-Many readers may find the biggest problem with `Forget` to be migration.
-RFC's confidence is taken from the fact that migration can be done easily. See [#migration](#migration) section for details.
+Many readers may find the biggest problem with `Forget` to be migration. RFC's confidence is taken from the fact that migration can be done easily. See [#migration](#migration) section for details.
 
 Back in 2015, the [decision was made][safe-mem-forget] to make `mem::forget` safe, making every type implicitly implement `Forget`. All APIs in `std` could've been preserved after that change, except one. Today is 2025 and some things changed, old reasoning is no longer true. This RFC is not targeted at resource leaks in general but is instead focused on allowing a number of APIs to become safe by providing new unsafe guarantees.
 
@@ -320,7 +319,7 @@ let borrower: Borrower<'_> = Borrower::new(&mut resource);
 
 // Violation of the unsafe contract - `resource` is no longer borrowed,
 // so repurposing protected memory is safe.
-std::mem::forget(borrower); 
+unsafe { std::mem::forget_unchecked(borrower) };
 
 let first_byte = resource[0]; // Potential UB
 ```
@@ -373,7 +372,6 @@ fn weakener<T>(foo: T) -> i32 {
     0
 }
 ```
-
 
 Currently, many APIs are forced into using `'static` bounds, which is one of the pain points users are reporting about `async` Rust, together with `Send` issues.
 
@@ -587,16 +585,14 @@ drop(foo_ref);
 drop(foo_mut);
 
 let mut_first_byte = mut_buf.0[0]; // Allowed
-drop(foo_ref); // Allowed
-drop(foo_mut); // Allowed
+drop(ref_buf); // Allowed
+drop(mut_buf); // Allowed
 
 // `Baz` cannot be moved or exclusively borrowed until `Foo` is dropped.
 fn phantom<'a>(baz: &'a Baz) -> Foo<PhantomData<&'a ()>> {
     Foo(PhantomNonForget, PhantomData)
 }
 ```
-
-~~Previous version: Unsafe code authors can rely on the fact that memory borrowed by `!Forget` types is not reused or invalidated until the drop (just like `Pin`'s [drop guarantee], but with indirection). Note that for `T: 'static` we don't have to run the destructor to fulfill this guarantee, as `'static` borrows can be assumed to be valid indefinitely (like with [`Pin::static_ref`]).~~
 
 [`Pin::static_ref`]: https://doc.rust-lang.org/std/pin/struct.Pin.html#method.static_ref
 
@@ -636,11 +632,13 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 - `Box::<T>::into_ptr` is available only for `T: Forget`. As for `T: !Forget` users should `ManuallyDrop::new_unchecked` and take the pointer via `&raw mut`. It will still be allowed to pass this pointer to `Box::from_ptr`.
 - `Box::<T>::forget` is available only for `T: Forget`.
 - `forget_unchecked`, a new unsafe function, is added to forget `T: ?Forget` types. It is a wrapper around `ManuallyDrop::new_unchecked`, just as `forget` is a wrapper around `ManuallyDrop::new`.
-- `PhantomNonForget` is a `!Forget` ZST for types to become `!Forget`.
+- `PhantomNonForget` is a `!Forget` ZST for types to become `!Forget`. If we decide to have `impl<T: 'static> Forget for T {}`, we should add a generic parameter/lifetime to `PhantomNonForget`.
 - `Vec::drain` is available only for `T: Forget` types. A new method might be added to work with `T: ?Forget`.
 - APIs like `std::sync::mpsc::Sender::send` are available only for `T: Forget`.
 - Possibly new channels should be introduced, that are compatible with `T: !Forget` types too.
 - `Vec::set_len` is available only for `T: Forget` types, to not create a footgun for `unsafe` code in the wild. Maybe a new method should be added to support `T: ?Forget`.
+- `ptr::write` is available for all types.
+- Etc
 
 ## Migration
 [migration]: #drawbacks
@@ -648,7 +646,7 @@ Unions are always `Forget`. All members of `union` must be `Forget`, but it is a
 ### Migration using [`local_default_bounds`] RFC
 [local-defaults-migration]: #local-defaults-migration
 
-The local_default_bounds RFC facilitates a smoother migration without requiring an edition change. In essence, it allows users to override default trait bounds, such as removing the `Sized` default or adding a custom trait like `MyFavouriteTrait`.
+The local_default_bounds RFC facilitates a smoother migration without requiring an edition change. In essence, it allows users to override default bounds on generics and associated types, such as change from `Forget` to `?Forget`. The process is comparable to the adoption of `const fn`, which is already accepted and loved feature, that keeps expanding and does not cause ecosystem splitting.
 
 We will provide an opt-in mechanism for crates to modify default bounds in function signatures.
 
@@ -661,7 +659,7 @@ mod migrated {
 }
 
 // Crate that has not migrated
-mod migrated {
+mod not_migrated {
     fn foo<T>(value: T) { /* ... */ } // T: Forget
 }
 ```
@@ -720,14 +718,14 @@ Earlier it was stated that Bounds for `Self` and associated types should default
 // After opting in, user needs to add `T::baz(..): Forget` to silence the error - quite easy.
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
-    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_foreign_bounds`
+    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_generic_bounds`
     // to `?Forget`, and default for associated types in `other_crate` is already `?Forget`. Otherwise it
     // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
     // as this code would've compiled now but not in the future.
     core::mem::forget(fut);
 }
 
-// `other_crate` that did not migrate yet. `Trait::bar(..)` is not locked into `Forget`, but
+// A library that did not migrate yet. `Trait::bar(..)` is not locked into `Forget`, but
 // this `other_crate` and other crates can only observe `Trait::bar(..): Forget` cases.
 mod other_crate {
     trait Trait {
@@ -758,7 +756,7 @@ If [`local_default_bounds`] is accepted, migration would be practically seamless
 ## Message Passing
 [drawbacks-message-passing]: #drawbacks-message-passing
 
-A traditional approach to message-passing cannot be applied to `!Forget` types - slightly different APIs should be developed, preserving a
+A traditional approach to the message-passing cannot be applied to `!Forget` types - slightly different APIs should be developed, preserving a
 lifetime connection between `tx` and `rx` handles.
 
 # Rationale and alternatives
@@ -829,7 +827,7 @@ The author of https://zetanumbers.github.io/book/myosotis.html is working on ano
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-This RFC will allow `async` Rust to come closer to sync ergonomics, but some code will not be able to reach this end goal and insert "abort bombs" into mandatory destructors. This is strictly better than today's status quo: `unsafe` in application code, you can work with it, but this is not ideal. A more robust approach would be the `Linear`/`MustMove`/`!Drop` types. This RFC makes a step towards more liveness guarantees, making them closer. As for the biggest problem - unwinding - with `async`, we have more choice over our behavior during unwinds. Even if we do not succeed with effects forbidding unwinding, the future containing linear type may catch any unwind during the poll and return `Poll::Pending`, potentially recovering - `async Drop` looks promising too.
+This RFC will allow `async` Rust to come closer to the sync ergonomics, but some code will not be able to reach this end goal and insert "abort bombs" into mandatory destructors. This is strictly better than today's status quo: `unsafe` in application code - you can work with it, but this defies the whole point of Rust. A more robust approach would be the `Linear`/`MustMove`/`!Drop` types. This RFC makes a step towards more liveness guarantees, making them closer. As for the biggest problem - unwinding - with `async`, we have more choice over our behavior during unwinds. Even if we do not succeed with effects forbidding unwinding, the future containing linear type may catch any unwind during the poll and return `Poll::Pending`, potentially recovering - `async Drop` looks promising too.
 
 Maybe if `!Forget` type borrows itself, it would be equivalent to the pinning?
 
