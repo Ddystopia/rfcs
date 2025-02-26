@@ -108,7 +108,7 @@ fn main() {
 }
 ```
 
-Code above will desugar into this:
+Code above will be observable as:
 
 ```rust
 use std::ops::Deref;
@@ -205,36 +205,49 @@ Every trait would initally have its unique default. In practice, bounds for all 
 
 [^trait-not-sized-by-default]: https://rust-lang.github.io/rfcs/0546-Self-not-sized-by-default.html
 
-## Desugaring
-
-### `default_generic_bounds`
-
-Applied for generic parameters.
+`default_generic_bounds` is applied for generic parameters. Effectively, it would be observable like that:
 
 ```rust
-fn foo<T: PartialEq + Sized>() {}
-struct Bar<T: PartialEq + Sized>(T);
-trait Baz<T: PartialEq + Sized> {
-    type Qux<U: PartialEq + Sized>;
-}
-trait Trait: Deref
-where
-    Self::Target: PartialEq + ?Sized
-{
-}
+// crate `b` that has not migrated to `#![default_generic_bounds(?Forget)]`
+mod b {
+    fn foo<T>() {} // Observed as `T: Forget` by `b` and other crates that have not migrated.
+    struct Bar<T>(T); // Observed as `T: Forget`
+    // `Self` and `Qux` will be ovservable or other crates, that migrated, without `Forget` bounds
+    trait Baz<T> { // Observed as `T: Forget`
+        type Qux<U>; // `U` is observed as `U: Forget`
+    }
 
-fn bar<T: Async>()
-    where T::method(..): PartialEq + Sized
-{}
+    // Observed as `T: Forget`, `U: Forget`, `for<V: Forget> Baz<V>: Forget`.
+    fn baz<T: Baz<U>, U>() {}
 
-trait Async {
-    async fn method();
+    trait Async {
+        async fn method();
+    }
+    // Applies to RPITIT too where, so observed as `T::method(..): Forget`
+    fn async_observer<T: Async>() {}
+
+    trait DerefTrait: Deref { }
+
+    // Associated types in generics are masked with `Forget` too.
+    // So `<T as Deref<Target>>` observed as `Deref<Target: Forget>`
+    fn deref_observer<T: DerefTrait>() {}
+
+    trait RecursiveTrait {
+        type Assoc: RecursiveTrait;
+    }
+
+    // All `<T as Trait>::Assoc`, `<<T as Trait>::Assoc as Trait>::Assoc`,
+    // `<<<T as Trait>::Assoc as Trait>::Assoc as Trait>::Assoc` etc would be
+    // observable as `: Forget`.
+    // `T` is observed as `T: RecursiveTrait + Forget` too.
+    fn recursive_observer<T: RecursiveTrait>() { }
 }
 ```
 
 # Drawbacks
 [drawbacks]: #drawbacks
 
+- It may increase compilation time due to the increased complexity of trait solving.
 - It may make reading source files of crates harder, as the reader should first look at the top of the crate to see the defaults, and then remember them. It may increase cognitive load.
 - It may take some time for the ecosystem around the language to fully adapt `!Trait`, but it will not be a breaking change.
 
