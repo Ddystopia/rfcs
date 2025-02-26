@@ -284,6 +284,8 @@ It may be possible to use the same trick over an edition for traits that we want
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
+- [ ] How to handle GATs? Rustc currently does not support proving `for<U> <T as Trait>::Assoc<U>: Forget`.
+- [ ] How to solve recursive associated type bounds? `trait Trait { type Assoc: Trait }`
 - [ ] Syntax
 - [ ] How to display it in Rustdoc
 - [ ] Should we allow default `!` bounds? What would it mean?
