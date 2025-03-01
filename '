@@ -105,11 +105,6 @@ impl Trait for &i32 {
     type Assoc = &'static str;
 }
 
-fn use_qux(qux: Qux) { /* ... */ }
-fn use_foo<T>(foo: Foo<T>) { /* ... */ }
-fn use_bar<T: ?PartialEq>(bar: Bar<T>) { /* ... */ }
-fn use_baz<T: Trait>(baz: Baz<T>) { /* ... */ }
-
 fn main() {
     let foo = Foo(Qux); //~ error[E0277]: the trait bound `Qux: PartialEq` is not satisfied
     let bar = Bar(Qux); // compiles as expected
@@ -129,7 +124,8 @@ trait Trait: Deref<Target: ?Forget> {
 struct Qux;
 struct Foo<T: ?Forget>(T);
 struct Bar<T: ?Forget>(T);
-struct Baz<'a, T: Trait>(T, &'a T::Target, T::Assoc);
+struct Baz<'a, T: Trait>(T, &'a T::Target, T::Assoc)
+;
 
 impl Trait for &i32 {
     type Assoc = &'static str;
@@ -196,9 +192,9 @@ This change would not be observable for not migrated crates, because `default_ge
 
 async fn foo<T: other_crate::Trait>(bar: T) {
     let fut = bar.baz();
-    // Compiler will emit an error that `fut` maybe `!Forget` because we set `default_generic_bounds`
-    // to `?Forget` and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
-    // would have been a breaking change for `other_crate` to make future returned by `baz` `!Forget`,
+    // Compiler will emit an error, as `fut` maybe `!Forget`, because we set `default_generic_bounds`
+    // to `?Forget`, and `default_assoc_bounds` in `other_crate` is already `?Forget`. Otherwise it
+    // would have been a breaking change for `other_crate` to make future provided by `baz` `!Forget`,
     // as this code would've compiled now but not in the future.
     core::mem::forget(fut);
 }
@@ -262,7 +258,7 @@ mod b {
 # Drawbacks
 [drawbacks]: #drawbacks
 
-- It may increase compilation time due to the additional complexity of trait solving.
+- It may increase compilation time due to the increased complexity of trait solving.
 - It may make reading source files of crates harder, as the reader should first look at the top of the crate to see the defaults, and then remember them. It may increase cognitive load.
 - It may take some time for the ecosystem around the language to fully adapt `!Trait`, but it will not include semver breaking changes for libraries or Rust code in general. Similar to `const fn` now.
 

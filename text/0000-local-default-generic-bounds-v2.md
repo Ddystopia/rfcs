@@ -101,6 +101,10 @@ impl Trait for &i32 {
     type Assoc = &'static str;
 }
 
+fn use_foo<T>(foo: Foo<T>) { /* ... */ }
+fn use_bar<T: ?PartialEq>(foo: Bar<T>) { /* ... */ }
+fn use_baz<T: Trait>(foo: Baz<T>) { /* ... */ }
+
 fn main() {
     let foo = Foo(Qux); //~ error[E0277]: the trait bound `Qux: PartialEq` is not satisfied
     let bar = Bar(Qux); // compiles as expected
