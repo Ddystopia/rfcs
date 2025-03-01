@@ -738,12 +738,14 @@ mod other_crate {
 
 It is not required, but in next editions we may swap the default for `default_generic_bounds`. Crates that want to continue using old default in next editions will set `#![default_generic_bounds(Forget)]`.
 
-### Migration over the edition, with a mask
+### Migration over the edition with [default auto traits]
 [edition-migration-with-mask]: #edition-migration-with-mask
 
 If [`local_default_bounds`] would not be accepted, we can have a satisfactory migration by having editions <= 2024 have `Forget` as default, and editions after 2024 have `?Forget` as default.
 
-While it will not split the ecosystem, it will require everyone to make a migration just as in the [`local_default_bounds`] solution. It can be automated for `#![forbid(unsafe)]` crates.
+While it will not split the ecosystem, it will require everyone to make a migration just as in the [`local_default_bounds`] solution. Can be automated for `#![forbid(unsafe)]` crates.
+
+[default auto traits]: https://github.com/rust-lang/rust/pull/120706
 
 # Drawbacks
 [drawbacks]: #drawbacks
