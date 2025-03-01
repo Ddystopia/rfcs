@@ -9,7 +9,7 @@
 # Summary
 [summary]: #summary
 
-This RFC proposes a mechanism for crates to define default bounds on generics, traits, and associated types. By specifying these defaults at the crate level we can reduce the need for verbose and repetitive `?Trait` annotations while maintaining backward compatibility and enabling future language evolution.
+This RFC proposes a mechanism for crates to define default bounds on generics. By specifying these defaults at the crate level we can reduce the need for verbose and repetitive `?Trait` annotations while maintaining backward compatibility and enabling future language evolution.
 
 # Motivation
 [motivation]: #motivation
